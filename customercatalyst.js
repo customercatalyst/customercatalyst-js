@@ -1,7 +1,7 @@
 /**
  * CustomerCatalyst Usage Tracking SDK
  * Tracks customer usage events for your CustomerCatalyst dashboard
- * Version: 1.0.0
+ * Version: 1.0.1
  */
 
 (function(window) {
@@ -10,7 +10,7 @@
   // Configuration
   const SUPABASE_URL = 'https://xfjgmzwigomtfmaloeun.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmamdtendpZ29tdGZtYWxvZXVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMyMzY3NjQsImV4cCI6MjA3ODgxMjc2NH0.WWU-x9fFvhsPBNG3QfhdqmGE2SgAHcoW0L3U_QMspgY';
-  const API_ENDPOINT = SUPABASE_URL + '/rest/v1/usage_events';
+  const API_ENDPOINT = SUPABASE_URL + '/rest/v1/rpc/track_event';
   
   // Rate limiting
   const RATE_LIMIT = {
@@ -124,21 +124,29 @@
     }
 
     async _sendEvents(events) {
-      const response = await fetch(API_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-          'x-api-key': this.apiKey,
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify(events.length === 1 ? events[0] : events)
-      });
+      // Send each event to the RPC function
+      for (const event of events) {
+        const response = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            p_api_key: event.api_key,
+            p_customer_id: event.customer_id,
+            p_event_type: event.event_type,
+            p_value: event.value,
+            p_metadata: event.metadata
+          })
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error('API Error: ' + errorText);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error('API Error: ' + errorText);
+        }
       }
     }
 
@@ -153,9 +161,9 @@
   window.CustomerCatalyst = CustomerCatalyst;
 
   window.addEventListener('beforeunload', function() {
-    if (eventQueue.length > 0) {
-      const data = JSON.stringify(eventQueue);
-      navigator.sendBeacon(API_ENDPOINT, data);
+    if (eventQueue.length > 0 && window.usageTracker) {
+      // Try to flush remaining events before page unload
+      window.usageTracker.flush();
     }
   });
 

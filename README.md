@@ -2,15 +2,6 @@
 
 Track customer usage events and monitor product adoption with CustomerCatalyst's lightweight JavaScript tracking library.
 
-## Features
-
-- 🚀 **Lightweight** - Minimal footprint, loads asynchronously
-- 📊 **Automatic batching** - Queues and batches events for optimal performance
-- 🔒 **Secure** - Uses your organization's unique API key
-- ⚡ **Rate limiting** - Built-in protection against API abuse
-- 🎯 **Simple API** - Just 2 methods: `identify()` and `track()`
-- 📱 **Cross-browser** - Works in all modern browsers
-
 ## Installation
 
 Add the following script tag to your HTML, preferably in the `<head>` section:

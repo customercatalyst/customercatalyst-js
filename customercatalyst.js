@@ -2,7 +2,7 @@
   'use strict';
 
   const SUPABASE_URL = 'https://xfjgmzwigomtfmaloeun.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmamdtendpZ29tdGZtYWxvZXVuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMyMzY3NjQsImV4cCI6MjA3ODgxMjc2NH0.WWU-x9fFvhsPBNG3QfhdqmGE2SgAHcoW0L3U_QMspgY';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_23PVXON8PjsWYOCpjtgrEQ_dJJTYRMj';
   const API_ENDPOINT = SUPABASE_URL + '/rest/v1/rpc/track_event';
 
   const RATE_LIMIT = {
@@ -139,8 +139,8 @@
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'apikey': SUPABASE_PUBLISHABLE_KEY,
+          'Authorization': '',
           'Prefer': 'return=minimal'
         },
         body: JSON.stringify(events.length === 1 ? events[0] : events)

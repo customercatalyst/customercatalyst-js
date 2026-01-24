@@ -2,7 +2,7 @@
   'use strict';
 
   const SUPABASE_URL = 'https://xfjgmzwigomtfmaloeun.supabase.co';
-  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_23PVXON8PjsWYOCpjtgrEQ_dJJTYRM';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_23PVXON8PjsWYOCpjtgrEQ_dJJTYRMj';
   const API_ENDPOINT = SUPABASE_URL + '/rest/v1/rpc/track_event';
 
   const RATE_LIMIT = {

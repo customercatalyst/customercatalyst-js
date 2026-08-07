@@ -3,18 +3,20 @@
 
   const SUPABASE_URL = 'https://xfjgmzwigomtfmaloeun.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_23PVXON8PjsWYOCpjtgrEQ_dJJTYRMj';
-  const API_ENDPOINT = SUPABASE_URL + '/rest/v1/rpc/track_event';
+  const API_ENDPOINT = SUPABASE_URL + '/rest/v1/rpc/track_events';
+
+  // The beacon cannot set headers, so the publishable key travels in the query
+  // string instead. Same gateway auth, different carrier.
+  const BEACON_ENDPOINT = API_ENDPOINT + '?apikey=' + encodeURIComponent(SUPABASE_PUBLISHABLE_KEY);
 
   const RATE_LIMIT = {
     maxRequestsPerSecond: 10,
-    // ponytail: one event per request. PostgREST /rpc has no bulk mode — an array
-    // body silently runs only its first element and still returns 200. Raise this
-    // only if track_event is changed to accept a jsonb array of events.
-    maxBatchSize: 1
+    maxBatchSize: 50 // server rejects more than 100 per call
   };
 
   let eventQueue = [];
   let isProcessing = false;
+  let activeApiKey = null;
   let lastRequestTime = 0;
 
   class CustomerCatalyst {
@@ -24,6 +26,7 @@
       }
       
       this.apiKey = apiKey;
+      activeApiKey = apiKey; // the page-hidden beacon runs outside any instance
       this.customerId = null;
       this.customerName = null;
       this.isStopped = false; // Flag to stop processing on fatal errors
@@ -52,12 +55,12 @@
         return;
       }
 
+      // The API key is sent once per request now, not once per event.
       const event = {
-        p_api_key: this.apiKey,
-        p_customer_id: this.customerId,
-        p_event_type: eventType,
-        p_value: typeof value === 'number' ? value : 1,
-        p_metadata: metadata || null
+        customer_id: this.customerId,
+        event_type: eventType,
+        value: typeof value === 'number' ? value : 1,
+        metadata: metadata || null
       };
 
       this._addToQueue(event);
@@ -119,22 +122,13 @@
     }
 
     _isFatalError(error) {
-      const errorMessage = error.message || '';
-      
-      // Fatal errors that should stop the SDK
-      const fatalPatterns = [
-        'Invalid API key',
-        '401',
-        '403',
-        'Unauthorized',
-        'Forbidden',
-        'api_key column not found',
-        'PGRST204'
-      ];
-      
-      return fatalPatterns.some(pattern => 
-        errorMessage.includes(pattern)
-      );
+      // A 4xx means the request itself is wrong — bad key, bad payload, missing
+      // function — and retrying cannot help. 5xx and network failures are
+      // transient, so those keep their retry.
+      if (typeof error.status === 'number') {
+        return error.status >= 400 && error.status < 500;
+      }
+      return false;
     }
 
     async _sendEvents(events) {
@@ -142,11 +136,9 @@
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': SUPABASE_PUBLISHABLE_KEY,
-          'Authorization': '',
-          'Prefer': 'return=minimal'
+          'apikey': SUPABASE_PUBLISHABLE_KEY
         },
-        body: JSON.stringify(events.length === 1 ? events[0] : events)
+        body: JSON.stringify({ p_api_key: this.apiKey, p_events: events })
       });
 
       if (!response.ok) {
@@ -155,6 +147,14 @@
         error.status = response.status; // Attach status code
         throw error;
       }
+
+      // The server reports what it actually stored. Comparing it against what we
+      // sent is what turns silent data loss into a visible warning.
+      const result = await response.json().catch(function () { return null; });
+      if (result && typeof result.inserted === 'number' && result.inserted !== events.length) {
+        console.warn('[CustomerCatalyst] Sent ' + events.length +
+          ' event(s) but the server stored ' + result.inserted);
+      }
     }
 
     async flush() {
@@ -162,10 +162,29 @@
         console.error('[CustomerCatalyst] SDK stopped. Cannot flush.');
         return;
       }
-      
-      if (eventQueue.length > 0) {
-        console.log('[CustomerCatalyst] Flushing', eventQueue.length, 'queued event(s)');
-        await this._processQueue();
+
+      if (eventQueue.length === 0) return;
+
+      console.log('[CustomerCatalyst] Flushing', eventQueue.length, 'queued event(s)');
+
+      // Deliberately bypasses the pacing: flush() is an explicit "send it now",
+      // and callers await it before navigating away. Drains fully, unlike a
+      // single _processQueue() pass, which only handles one batch.
+      while (eventQueue.length > 0 && !this.isStopped) {
+        const batch = eventQueue.splice(0, RATE_LIMIT.maxBatchSize);
+        try {
+          await this._sendEvents(batch);
+          console.log('[CustomerCatalyst] Flushed', batch.length, 'event(s)');
+        } catch (error) {
+          if (this._isFatalError(error)) {
+            console.error('[CustomerCatalyst] Fatal error during flush. Stopping SDK.', error.message);
+            this.isStopped = true;
+            eventQueue = [];
+          } else {
+            eventQueue.unshift(...batch);
+          }
+          throw error;
+        }
       }
     }
 
@@ -180,12 +199,32 @@
 
   window.CustomerCatalyst = CustomerCatalyst;
 
-  window.addEventListener('beforeunload', function() {
-    if (eventQueue.length > 0) {
-      const data = JSON.stringify(eventQueue);
-      navigator.sendBeacon(API_ENDPOINT, data);
+  // Last chance to save whatever is still queued. Fires on tab switch, app
+  // switch, screen lock and close — 'beforeunload' misses most of those,
+  // especially on mobile, which is why it is not used here.
+  function sendPending() {
+    if (!activeApiKey || eventQueue.length === 0 || !navigator.sendBeacon) return;
+
+    // Form-encoded so the browser needs no CORS preflight, which it cannot do
+    // reliably while the page is going away. 100 is the server's per-call cap.
+    while (eventQueue.length > 0) {
+      const batch = eventQueue.splice(0, 100);
+      const body = new URLSearchParams({
+        p_api_key: activeApiKey,
+        p_events: JSON.stringify(batch)
+      });
+      if (!navigator.sendBeacon(BEACON_ENDPOINT, body)) {
+        // Refused (usually the ~64KB payload limit) — keep them for a retry.
+        eventQueue.unshift(...batch);
+        break;
+      }
     }
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') sendPending();
   });
+  window.addEventListener('pagehide', sendPending);
 
   console.log('[CustomerCatalyst] SDK loaded and ready');
 

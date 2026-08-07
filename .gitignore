@@ -5,3 +5,4 @@ node_modules/
 .idea/
 *.log
 sdk-console.html
+customercatalyst.dev.js

@@ -7,7 +7,7 @@ Track customer usage events and monitor product adoption with CustomerCatalyst's
 Add the following script tag to your HTML, preferably in the `<head>` section:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/utkuairdev/customercatalyst-js@main/customercatalyst.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/customercatalyst/customercatalyst-js@main/customercatalyst.js"></script>
 ```
 
 ## Quick Start
@@ -16,7 +16,7 @@ Add the following script tag to your HTML, preferably in the `<head>` section:
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://cdn.jsdelivr.net/gh/utkuairdev/customercatalyst-js@main/customercatalyst.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/customercatalyst/customercatalyst-js@main/customercatalyst.js"></script>
 </head>
 <body>
   <script>
@@ -138,7 +138,7 @@ cc.track('settings_updated');
 
 ```html
 <!-- Include on every page -->
-<script src="https://cdn.jsdelivr.net/gh/utkuairdev/customercatalyst-js@main/customercatalyst.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/customercatalyst/customercatalyst-js@main/customercatalyst.js"></script>
 <script>
   var cc = new CustomerCatalyst('YOUR_API_KEY');
   cc.identify({ customerId: 'CUSTOMER_ID' });

@@ -6,3 +6,4 @@ node_modules/
 *.log
 sdk-console.html
 customercatalyst.dev.js
+test.js

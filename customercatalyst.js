@@ -29,8 +29,11 @@
   let inFlightItems = [];   // the batch on the wire — already out of the queue,
                             // so the beacon has to be told about it separately
   let lastRequestTime = 0;
-  let consecutiveFailures = 0;
   let drainWaiters = [];
+
+  // Backoff is counted per key. A shared counter let one organisation's healthy
+  // traffic reset the backoff another had earned from real failures.
+  const failuresByKey = new Map();
 
   // Stopping is tracked per key, not per instance: two instances sharing one
   // queue must not be able to discard each other's events.
@@ -38,6 +41,7 @@
 
   function stopKey(key) {
     stoppedKeys.add(key);
+    failuresByKey.delete(key);
     eventQueue = eventQueue.filter(function(item) { return item.key !== key; });
   }
 
@@ -80,7 +84,11 @@
   // accepts a bounded number of decimals, so round here rather than let a real
   // value be silently replaced by 1. Negatives are not meaningful for usage.
   function safeValue(value) {
-    if (typeof value !== 'number' || !isFinite(value) || value < 0) return 1;
+    if (value === undefined || value === null) return 1;
+    if (typeof value !== 'number' || !isFinite(value) || value < 0) {
+      console.warn('[CustomerCatalyst] value must be a non-negative number — using 1 instead of', value);
+      return 1;
+    }
     return Math.round(value * 1000000) / 1000000;
   }
 
@@ -115,8 +123,6 @@
       this.apiKey = apiKey;
       this.customerId = null;
       this.customerName = null;
-
-      console.log('[CustomerCatalyst] SDK initialized');
     }
 
     get isStopped() {
@@ -133,8 +139,6 @@
 
       this.customerId = options.customerId;
       this.customerName = options.customerName || null;
-
-      console.log('[CustomerCatalyst] Customer identified:', this.customerName || this.customerId);
     }
 
     track(eventType, value, metadata) {
@@ -205,8 +209,7 @@
       try {
         inFlight = this._sendEvents(batch.key, payloadOf(batch.items));
         await inFlight;
-        consecutiveFailures = 0;
-        console.log('[CustomerCatalyst] Successfully tracked', batch.items.length, 'event(s)');
+        failuresByKey.delete(batch.key);
       } catch (error) {
         console.error('[CustomerCatalyst] Failed to send events:', error.message);
 
@@ -229,9 +232,13 @@
           return;
         }
 
-        consecutiveFailures++;
+        failuresByKey.set(batch.key, (failuresByKey.get(batch.key) || 0) + 1);
         console.warn('[CustomerCatalyst] Retryable error. Events will be retried.');
-        eventQueue = batch.items.concat(eventQueue);
+        // Back of the queue, not the front. Re-claiming the front meant a key
+        // whose endpoint was failing held position zero on every retry forever,
+        // starving every other key on the page and eventually pushing their
+        // events out against the shared queue cap.
+        eventQueue = eventQueue.concat(batch.items);
       } finally {
         inFlight = null;
         inFlightItems = [];
@@ -240,8 +247,10 @@
       if (eventQueue.length > 0) {
         // Backing off matters during an outage: without it every open tab
         // retries ten times a second for as long as the endpoint is down.
-        const delay = consecutiveFailures > 0
-          ? Math.min(LIMITS.maxBackoffMs, minInterval * Math.pow(2, consecutiveFailures))
+        // Paced by whichever key is next in line, not by a shared counter.
+        const failures = failuresByKey.get(eventQueue[0].key) || 0;
+        const delay = failures > 0
+          ? Math.min(LIMITS.maxBackoffMs, minInterval * Math.pow(2, failures))
           : minInterval;
         setTimeout(() => this._processQueue(), delay);
       } else {
@@ -321,9 +330,8 @@
     }
 
     restart() {
-      console.log('[CustomerCatalyst] Restarting SDK...');
       stoppedKeys.delete(this.apiKey);
-      consecutiveFailures = 0;
+      failuresByKey.delete(this.apiKey);
       if (eventQueue.length > 0 && !isProcessing) {
         this._processQueue();
       }
@@ -373,6 +381,5 @@
   });
   window.addEventListener('pagehide', sendPending);
 
-  console.log('[CustomerCatalyst] SDK loaded and ready');
 
 })(window);

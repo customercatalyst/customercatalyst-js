@@ -7,3 +7,5 @@ node_modules/
 sdk-console.html
 customercatalyst.dev.js
 test.js
+customercatalyst-test-sdk.js
+dist/

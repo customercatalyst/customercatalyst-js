@@ -274,11 +274,36 @@ documented so you know what happens at the edges.
 | Limit | Value | What happens if exceeded |
 |---|---|---|
 | Events per organization | 50,000 per hour | Further events are refused until the next hour. The SDK treats this as temporary and retries. |
+| Events per `track()` call | always 1 | — |
 | `customerId` length | 255 characters | `identify()` throws. |
 | `eventType` length | 255 characters | `track()` throws. |
 | `value` | 0 or greater, up to 12 digits and 6 decimals | Stored as `1`, with a console warning. |
 | Single event size | About 28 KB, including `metadata` | The event is dropped with a warning. Batches are split to stay under this. |
 | Queued events | 1,000 | Further events are dropped with a warning until the queue drains. |
+
+### How events are counted
+
+One `track()` call is one event, whatever `value` you pass. `value` is the quantity recorded against
+that event, not a multiplier on it:
+
+```javascript
+cc.track('invoice_created', 50);   // 1 event, contributes 50
+```
+
+Batching does not change this. The SDK groups events into fewer network requests for efficiency, but
+50 batched events are still 50 events.
+
+Since metrics are totalled from `value`, recording a quantity once is equivalent to recording it
+piece by piece — and far cheaper:
+
+```javascript
+// Same result. The first is one event, the second is fifty.
+cc.track('invoices_created', 50);
+for (var i = 0; i < 50; i++) cc.track('invoices_created');
+```
+
+Prefer the first whenever you already know the quantity. It uses a fraction of your hourly allowance
+and far less of your users' bandwidth.
 
 Sending is capped at 10 requests per second, and events are batched, so a burst of activity is sent
 in a few requests rather than hundreds.

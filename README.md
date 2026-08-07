@@ -114,10 +114,28 @@ cc.track('export_report', 1, { format: 'pdf', pages: 24 });
 
 ### `flush()`
 
-Manually send all queued events immediately (rarely needed).
+Send everything still queued and wait for it to land (rarely needed — events
+send on their own, and anything still queued is sent automatically when the page
+is hidden or closed).
 
 ```javascript
-cc.flush();
+await cc.flush();
+```
+
+Returns a promise. It resolves once the queue has drained, or after 5 seconds if
+the server is unreachable, so it can never hold up a page navigation. Sending
+stays rate limited, so a large queue takes a moment.
+
+---
+
+### `restart()`
+
+Resume after a fatal error stopped the SDK. Only useful if the cause was
+temporary — for a wrong API key, create a new instance with the correct key
+instead, since the key is fixed when the instance is created.
+
+```javascript
+cc.restart();
 ```
 
 ## Examples
@@ -164,15 +182,15 @@ The SDK automatically handles errors to prevent infinite retry loops.
 
 ### Fatal Errors (SDK Stops)
 
-When these errors occur, the SDK stops processing:
+When these errors occur, the SDK stops sending for that API key:
 - Invalid API key
 - Authentication errors
-- Configuration errors
+- Anything else the server rejects as a bad request
 
 ```javascript
 // SDK detects fatal error and stops
-[CustomerCatalyst] Failed to send events: Invalid API key
-[CustomerCatalyst] Fatal error detected. Stopping SDK.
+[CustomerCatalyst] Failed to send events: API Error 400: Invalid API key
+[CustomerCatalyst] Fatal error detected. Stopping SDK for this API key.
 
 // Future track() calls are ignored
 cc.track('event'); // Won't send
@@ -180,13 +198,14 @@ cc.track('event'); // Won't send
 
 ### Retryable Errors (SDK Auto-Retries)
 
-The SDK automatically retries temporary errors:
+The SDK automatically retries temporary errors, waiting longer after each
+failure so a struggling server is not overwhelmed:
 - Network timeouts
 - Server errors
-- Rate limiting
+- Rate limiting (429) and request timeouts (408)
 
 ```javascript
-[CustomerCatalyst] Failed to send events: Network timeout
+[CustomerCatalyst] Failed to send events: Failed to fetch
 [CustomerCatalyst] Retryable error. Events will be retried.
 // Automatically retries ✅
 ```
@@ -229,11 +248,23 @@ cc.identify({ customerId: 'CUSTOMER_ID' });
 - **"Must call identify() before tracking events"**  
   Call `cc.identify()` before any `cc.track()` calls
 
-- **"Invalid API key"**  
+- **"API Error 400: Invalid API key"**  
   Verify your API key starts with `org_` and is active
 
-- **"eventType must be a non-empty string"**  
+- **"eventType is required and must be a non-empty string"**  
   Pass a valid event name as the first parameter
+
+- **"metadata must be a plain object — ignoring it"**  
+  Pass an object, not an array or a string. The event is still recorded, without
+  the metadata.
+
+- **"value must be a non-negative number — using 1 instead of …"**  
+  Values must be finite and zero or greater. The event is still recorded, with a
+  value of 1.
+
+- **"Server rejected N of M event(s) as invalid"**  
+  A customer ID or event name was blank or longer than 255 characters. Those
+  events were not stored.
 
 ## Browser Support
 

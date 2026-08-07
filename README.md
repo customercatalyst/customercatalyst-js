@@ -266,6 +266,31 @@ cc.identify({ customerId: 'CUSTOMER_ID' });
   A customer ID or event name was blank or longer than 255 characters. Those
   events were not stored.
 
+## Limits
+
+The SDK paces itself and batches automatically, so normal use never approaches these. They are
+documented so you know what happens at the edges.
+
+| Limit | Value | What happens if exceeded |
+|---|---|---|
+| Events per organization | 50,000 per hour | Further events are refused until the next hour. The SDK treats this as temporary and retries. |
+| `customerId` length | 255 characters | `identify()` throws. |
+| `eventType` length | 255 characters | `track()` throws. |
+| `value` | 0 or greater, up to 12 digits and 6 decimals | Stored as `1`, with a console warning. |
+| Single event size | About 28 KB, including `metadata` | The event is dropped with a warning. Batches are split to stay under this. |
+| Queued events | 1,000 | Further events are dropped with a warning until the queue drains. |
+
+Sending is capped at 10 requests per second, and events are batched, so a burst of activity is sent
+in a few requests rather than hundreds.
+
+If the server rejects individual events as invalid, the SDK reports it:
+
+```
+[CustomerCatalyst] Server rejected 2 of 50 event(s) as invalid
+```
+
+That means a `customerId` or `eventType` was blank or too long. The remaining events were stored.
+
 ## Browser Support
 
 Works in all modern browsers:

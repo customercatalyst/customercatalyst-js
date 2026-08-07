@@ -12,7 +12,7 @@
 
   const LIMITS = {
     maxRequestsPerSecond: 10,
-    maxBatchSize: 50,       // server refuses more than 100 per call
+    maxBatchSize: 50,       // half the server's 100, so a retry can never trip it
     maxBatchBytes: 28000,   // server refuses over 32768; leave room for the envelope
     maxQueueLength: 1000,   // an unreachable endpoint must not grow memory forever
     maxBackoffMs: 30000,
@@ -26,6 +26,7 @@
   let eventQueue = [];
   let isProcessing = false;
   let inFlight = null;
+  let inFlightKey = null;
   let inFlightItems = [];   // the batch on the wire — already out of the queue,
                             // so the beacon has to be told about it separately
   let lastRequestTime = 0;
@@ -205,6 +206,7 @@
       const batch = takeBatch(LIMITS.maxBatchSize);
       lastRequestTime = Date.now();
       inFlightItems = batch.items;
+      inFlightKey = batch.key;
 
       try {
         inFlight = this._sendEvents(batch.key, payloadOf(batch.items));
@@ -219,6 +221,7 @@
           // may be sending under a key that is perfectly healthy.
           stopKey(batch.key);
           inFlight = null;
+          inFlightKey = null;
           inFlightItems = [];
 
           // Another key's events may still be queued behind this one — stopping
@@ -241,6 +244,7 @@
         eventQueue = eventQueue.concat(batch.items);
       } finally {
         inFlight = null;
+        inFlightKey = null;
         inFlightItems = [];
       }
 
@@ -303,12 +307,17 @@
     }
 
     async flush() {
+      const self = this;
+
       if (this.isStopped) {
         console.error('[CustomerCatalyst] SDK stopped. Cannot flush.');
         return;
       }
 
-      if (eventQueue.length === 0 && !isProcessing) return;
+      // Only wait on this key's work. Blocking on an unrelated organisation's
+      // traffic would couple two instances' latency for no reason.
+      const mine = eventQueue.some(function(item) { return item.key === self.apiKey; });
+      if (!mine && inFlightKey !== self.apiKey) return;
 
       // Waits for the drain loop rather than sending in parallel with it.
       // Sending here too would bypass the rate limit and, worse, two senders
@@ -371,7 +380,11 @@
       // a refusal means "too big right now", not "never". Halve and retry
       // rather than abandoning everything still queued.
       eventQueue = batch.items.concat(eventQueue);
-      if (size === 1) break;
+      if (size === 1) {
+        console.warn('[CustomerCatalyst] Browser refused the final beacon — ' +
+          eventQueue.length + ' event(s) could not be sent');
+        break;
+      }
       size = Math.max(1, Math.floor(size / 2));
     }
   }

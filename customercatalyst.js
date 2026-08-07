@@ -7,7 +7,10 @@
 
   const RATE_LIMIT = {
     maxRequestsPerSecond: 10,
-    maxBatchSize: 10
+    // ponytail: one event per request. PostgREST /rpc has no bulk mode — an array
+    // body silently runs only its first element and still returns 200. Raise this
+    // only if track_event is changed to accept a jsonb array of events.
+    maxBatchSize: 1
   };
 
   let eventQueue = [];

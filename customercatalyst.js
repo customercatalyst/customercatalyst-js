@@ -14,6 +14,7 @@
     maxRequestsPerSecond: 10,
     maxBatchSize: 50,       // half the server's 100, so a retry can never trip it
     maxBatchBytes: 28000,   // server refuses over 32768; leave room for the envelope
+    maxBeaconBytes: 48000,  // form-encoded, against a 64KB budget shared page-wide
     maxQueueLength: 1000,   // an unreachable endpoint must not grow memory forever
     maxBackoffMs: 30000,
     maxAttempts: 10,        // a batch that keeps failing is dropped, not retried forever
@@ -82,6 +83,20 @@
     const waiting = drainWaiters;
     drainWaiters = [];
     waiting.forEach(function(resolve) { resolve(); });
+  }
+
+  // Every limit here is in BYTES, because that is what the server and the beacon
+  // budget count. String.length counts UTF-16 code units, which equals bytes only
+  // for ASCII: "ü" is one unit and two bytes, an emoji is two units and four. A
+  // .length guard therefore passes payloads the server then refuses — and a
+  // refusal used to stop the organisation's tracking outright.
+  const textEncoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+
+  function byteLength(str) {
+    // No TextEncoder means a browser old enough that .length is the best
+    // available guess. Degrading is right here; throwing on a customer's page
+    // to protect a size estimate is not.
+    return textEncoder ? textEncoder.encode(str).length : str.length;
   }
 
   function newEventId() {
@@ -245,7 +260,8 @@
         metadata: safeMetadata(metadata)
       };
 
-      const size = JSON.stringify(event).length + 1;
+      // +1 for the comma this event will need once it joins a batch array.
+      const size = byteLength(JSON.stringify(event)) + 1;
       if (size > LIMITS.maxBatchBytes) {
         console.warn('[CustomerCatalyst] Event is too large to send (' + size + ' bytes) — dropping it');
         return;
@@ -484,12 +500,45 @@
     // Form-encoded so no CORS preflight is needed — a page on its way out
     // cannot reliably complete one.
     let size = LIMITS.maxBatchSize;
+    // Events a beacon cannot carry. Kept aside for the fetch path if the page
+    // turns out to survive; lost with the rest of the queue if it does not,
+    // which is already true of anything still queued at unload.
+    const deferred = [];
     while (eventQueue.length > 0) {
       const batch = takeBatch(size);
       const body = new URLSearchParams({
         p_api_key: batch.key,
         p_events: JSON.stringify(payloadOf(batch.items))
       });
+
+      // Form-encoding is what actually goes on the wire, and it percent-escapes
+      // every { " : and , to three bytes — JSON roughly doubles. A batch sized
+      // against the 28KB request limit becomes 50–70KB here, over the 64KB budget
+      // the browser shares across every beacon on the page. Measuring the encoded
+      // body means shrinking to fit directly, instead of learning it from two or
+      // three refusals during the few moments a closing page still has.
+      if (byteLength(body.toString()) > LIMITS.maxBeaconBytes) {
+        if (size > 1) {
+          eventQueue = batch.items.concat(eventQueue);
+          size = Math.max(1, Math.floor(size / 2));
+          continue;
+        }
+        // One event that will not fit even on its own. Metadata of many short
+        // key/value pairs encodes near the 3x ceiling, so an event comfortably
+        // inside the 28KB request limit can land over this one. Sending it anyway
+        // would claim most of the budget every other instance on the page is
+        // trying to flush into at the same moment — and if the browser refused
+        // it, the loop below abandons everything still queued, including other
+        // organisations'.
+        //
+        // Set it aside rather than discard it: 'hidden' fires on tab switch as
+        // well as on close, and a page that survives can still send this through
+        // the fetch path, which only has to respect the 28KB limit it already
+        // passes. Held in a local array, not put straight back, or takeBatch
+        // would pick it up again on the next turn of this loop and never finish.
+        deferred.push.apply(deferred, batch.items);
+        continue;
+      }
 
       if (navigator.sendBeacon(BEACON_ENDPOINT, body)) continue;
 
@@ -504,6 +553,10 @@
       }
       size = Math.max(1, Math.floor(size / 2));
     }
+
+    // Restored after the loop, including on the break above, and at the front:
+    // they are older than anything that arrives next.
+    if (deferred.length > 0) eventQueue = deferred.concat(eventQueue);
   }
 
   document.addEventListener('visibilitychange', function() {

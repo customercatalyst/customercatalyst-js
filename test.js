@@ -98,18 +98,40 @@ function load(fetchImpl, beaconImpl, limits) {
   }
 
   // --- batching by size, not just count ------------------------------------
+  // Measured with Buffer.byteLength, NOT String.length: the limit is in bytes and
+  // the two agree only for ASCII. The padding is deliberately non-ASCII for the
+  // same reason — an ASCII fixture measured with .length passes whether the
+  // implementation counts bytes or code units, so it tests nothing.
+  const bytes = s => Buffer.byteLength(s, 'utf8');
   {
     let maxBytes = 0, delivered = 0;
     const { CC } = load(async (u, o) => {
-      maxBytes = Math.max(maxBytes, o.body.length);
+      maxBytes = Math.max(maxBytes, bytes(o.body));
       const n = JSON.parse(o.body).p_events.length; delivered += n; return okResp(n);
     });
     const cc = new CC('org_test'); cc.identify({ customerId: 'c1' });
-    const pad = 'y'.repeat(700);
+    const pad = 'ş'.repeat(700);        // 700 code units, 1400 bytes
     for (let i = 0; i < 60; i++) cc.track('fat', 1, { pad, i });
-    await sleep(3000);
+    await sleep(4000);
     check('a batch never exceeds the server byte limit', maxBytes <= 32768, maxBytes + ' bytes');
     check('no event is lost when splitting by size', delivered === 60, delivered + '/60');
+  }
+
+  // --- an over-limit event is measured in bytes, not code units -------------
+  // The fixture has to discriminate, which rules out emoji: they are surrogate
+  // pairs, so .length already counts them as 2 and an over-byte emoji payload is
+  // over-length too. '中' is ONE code unit and THREE bytes — 12000 of them read
+  // as 12000 against the 28000 limit while weighing 36000 on the wire, so a
+  // .length guard accepts it and only a byte guard drops it.
+  {
+    let sent = 0;
+    const { CC } = load(async (u, o) => { sent += JSON.parse(o.body).p_events.length; return okResp(1); });
+    const cc = new CC('org_wide'); cc.identify({ customerId: 'c1' });
+    cc.track('huge', 1, { pad: '中'.repeat(12000) });
+    cc.track('small', 1);
+    await sleep(800);
+    check('an event over the byte limit is dropped even when .length looks safe',
+      sent === 1, sent + ' sent');
   }
 
   // --- error classification -------------------------------------------------
@@ -175,6 +197,64 @@ function load(fetchImpl, beaconImpl, limits) {
     check('stopping a key counts the queued events it discarded',
       cc.stats.droppedEvents === 5, JSON.stringify(cc.stats));
     check('nothing is left queued after stopping', cc.stats.queued === 0);
+  }
+
+  // --- the beacon is sized after form-encoding, not before ------------------
+  // URLSearchParams percent-escapes every { " : and , to three bytes, so a batch
+  // that fits the 28KB request limit can be 50-70KB on the wire. Sizing the raw
+  // JSON sends bodies over the browser's 64KB budget and learns it from refusals.
+  {
+    let maxBody = 0, beacons = 0;
+    const { CC, hide } = load(undefined, (url, body) => {
+      beacons++;
+      maxBody = Math.max(maxBody, bytes(String(body)));
+      return true;
+    });
+    const cc = new CC('org_beacon'); cc.identify({ customerId: 'c1' });
+    const pad = 'ü'.repeat(400);
+    for (let i = 0; i < 120; i++) cc.track('leaving', 1, { pad, i });
+    hide();
+    check('a beacon body stays inside the browser budget once encoded',
+      maxBody <= 48000, maxBody + ' bytes');
+    check('the queue still leaves on page hide', beacons > 0, beacons + ' beacon(s)');
+  }
+
+  // --- one event too big to beacon must not abandon the rest ----------------
+  // Metadata of many short key/value pairs encodes near the 3x ceiling, so an
+  // event that passes the 28KB request cap can exceed the 48KB beacon cap on its
+  // own. It cannot be shrunk any further, and sending it would claim most of the
+  // page-wide budget — or be refused, which used to abandon the whole queue.
+  {
+    const many = {};
+    // The window is narrow: at the ~1.83x encoding ratio these pairs produce,
+    // only events between roughly 26200 and 28000 raw bytes are accepted by
+    // track() yet unbeaconable. 1850 pairs sits inside it.
+    for (let i = 0; i < 1850; i++) many['k' + i] = 'v' + i;
+    // Measure what the SDK measures: the whole event object, not the metadata alone.
+    const ev = { event_id: 'x'.repeat(36), customer_id: 'c1', event_type: 'toobig', value: 1, metadata: many };
+    const rawBytes = bytes(JSON.stringify(ev)) + 1;
+    const encBytes = bytes(new URLSearchParams({ p_api_key: 'org_fat', p_events: JSON.stringify([ev]) }).toString());
+    check('fixture is valid: fits the request cap but not the beacon cap',
+      rawBytes < 28000 && encBytes > 48000, rawBytes + ' raw / ' + encBytes + ' encoded');
+
+    let maxBody = 0, delivered = 0;
+    const { CC, hide } = load(undefined, (url, body) => {
+      maxBody = Math.max(maxBody, bytes(String(body)));
+      delivered += JSON.parse(new URLSearchParams(String(body)).get('p_events')).length;
+      return true;
+    });
+    const cc = new CC('org_fat'); cc.identify({ customerId: 'c1' });
+    cc.track('toobig', 1, many);
+    for (let i = 0; i < 5; i++) cc.track('small' + i, 1);
+    hide();
+    check('an unbeaconable event is not sent over budget',
+      maxBody <= 48000, maxBody + ' bytes');
+    check('the events behind it still leave', delivered === 5, delivered + ' delivered');
+    // 'hidden' fires on tab switch too, and the page may well survive. The event
+    // is under the 28KB request cap, so the fetch path can still deliver it —
+    // keeping it beats discarding it over a beacon-only ceiling.
+    check('the unbeaconable event is kept for the fetch path',
+      cc.stats.queued === 1 && cc.stats.droppedEvents === 0, JSON.stringify(cc.stats));
   }
 
   // --- hiding the page mid-request must not double-count the loss -----------

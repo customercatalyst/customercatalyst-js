@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CustomerCatalyst SDK — Test Console</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e8ec;
+    --muted: #8b93a3; --accent: #4c8dff; --ok: #3ecf8e; --warn: #f0b429; --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  header {
+    padding: 16px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .target { font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .target b { color: var(--warn); }
+  .target.prod b { color: var(--err); }
+  .target.dev b { color: var(--ok); }
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 0; height: calc(100vh - 57px); }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; height: auto; } }
+  .controls { padding: 16px 20px; overflow-y: auto; border-right: 1px solid var(--line); }
+  fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 0 0 14px; }
+  legend { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 0 6px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+  input, select, textarea {
+    width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--text); padding: 7px 9px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 54px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 7px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .console { display: flex; flex-direction: column; min-height: 400px; }
+  .console-bar {
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .console-bar span { color: var(--muted); font-size: 12px; margin-right: auto; }
+  #log {
+    flex: 1; overflow-y: auto; padding: 10px 16px; margin: 0;
+    font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+  }
+  .e { padding: 1px 0; border-bottom: 1px solid #1c1f27; }
+  .e time { color: #5b6373; margin-right: 8px; }
+  .log b { color: var(--text); } .info b { color: var(--accent); }
+  .warn b { color: var(--warn); } .error b { color: var(--err); }
+  .net b { color: var(--ok); } .sys b { color: #a78bfa; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CustomerCatalyst SDK — Test Console</h1>
+  <span id="target" class="target">SDK not loaded</span>
+</header>
+
+<main>
+  <div class="controls">
+
+    <fieldset>
+      <legend>1 · Load SDK</legend>
+      <label for="src">Preset</label>
+      <select id="src">
+        <option value="https://cdn.customercatalyst.io/customercatalyst.js">Prod — cdn.customercatalyst.io (live)</option>
+        <option value="customercatalyst.js">Prod — local file (./customercatalyst.js)</option>
+        <option value="customercatalyst.dev.js">Dev — local build (./customercatalyst.dev.js)</option>
+      </select>
+
+      <label for="srcUrl">SDK URL — edit freely</label>
+      <input id="srcUrl" placeholder="https://…/customercatalyst.js">
+      <p class="hint">
+        <code>cdn.customercatalyst.io</code> republishes on every push to <code>main</code>
+        and revalidates on every load, so it is always current.<br>
+        A preview build from a branch also works:
+        <code>https://&lt;branch&gt;.customercatalyst-js.pages.dev/customercatalyst.js</code>
+      </p>
+      <div class="btns"><button id="load" class="primary">Load SDK</button></div>
+      <p class="hint">Loading reads the file and reports which Supabase project it targets — check the banner before tracking.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>2 · Initialise &amp; identify</legend>
+      <label for="apiKey">Organisation API key</label>
+      <input id="apiKey" placeholder="org_…">
+      <div class="btns"><button id="init" disabled>new CustomerCatalyst()</button></div>
+
+      <label for="customerId">Customer ID</label>
+      <input id="customerId" placeholder="1234567890x098765432109876543">
+      <label for="customerName">Customer name (optional)</label>
+      <input id="customerName" placeholder="Acme Corporation">
+      <div class="btns"><button id="identify" disabled>identify()</button></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>3 · Track</legend>
+      <label for="eventType">Event type</label>
+      <input id="eventType" value="login">
+      <div class="row">
+        <div>
+          <label for="value">Value</label>
+          <input id="value" type="number" value="1">
+        </div>
+        <div>
+          <label for="burst">Burst count</label>
+          <input id="burst" type="number" value="15" min="1" max="200">
+        </div>
+      </div>
+      <label for="metadata">Metadata (JSON, optional)</label>
+      <textarea id="metadata" placeholder='{"source":"console-test"}'></textarea>
+      <div class="btns">
+        <button id="track" class="primary" disabled>track()</button>
+        <button id="trackBurst" disabled>Track burst</button>
+      </div>
+      <p class="hint">Burst sends N events at once — batches of 10, max 10 req/sec. Use it to watch queueing and rate limiting.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>4 · Lifecycle</legend>
+      <div class="btns">
+        <button id="flush" disabled>flush()</button>
+        <button id="restart" disabled>restart()</button>
+        <button id="errNoKey">Error: no API key</button>
+        <button id="errNoIdent">Error: track before identify</button>
+      </div>
+      <p class="hint">The two error buttons assert the SDK's guard clauses.</p>
+    </fieldset>
+
+  </div>
+
+  <div class="console">
+    <div class="console-bar">
+      <span id="status">Ready — load the SDK to begin.</span>
+      <button id="copy">Copy log</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $("log");
+  var cc = null;
+
+  // ---- log pane -----------------------------------------------------------
+  function write(kind, label, msg) {
+    var atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+    var row = document.createElement("div");
+    row.className = "e " + kind;
+    var t = new Date();
+    var stamp = String(t.getHours()).padStart(2, "0") + ":" +
+                String(t.getMinutes()).padStart(2, "0") + ":" +
+                String(t.getSeconds()).padStart(2, "0") + "." +
+                String(t.getMilliseconds()).padStart(3, "0");
+    row.innerHTML = '<time>' + stamp + '</time><b>' + label + '</b> ';
+    row.appendChild(document.createTextNode(msg));
+    logEl.appendChild(row);
+    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function fmt(args) {
+    return Array.prototype.map.call(args, function (a) {
+      if (typeof a === "string") return a;
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }).join(" ");
+  }
+
+  // Mirror the page console into the pane, keeping devtools working too.
+  ["log", "info", "warn", "error"].forEach(function (level) {
+    var original = console[level].bind(console);
+    console[level] = function () {
+      write(level === "info" ? "info" : level, level.toUpperCase(), fmt(arguments));
+      original.apply(null, arguments);
+    };
+  });
+
+  window.addEventListener("error", function (e) { write("error", "PAGE", e.message); });
+  window.addEventListener("unhandledrejection", function (e) { write("error", "PROMISE", String(e.reason)); });
+
+  // ---- network tap --------------------------------------------------------
+  // The SDK swallows response bodies, so tap fetch to surface status + payload.
+  var nativeFetch = window.fetch.bind(window);
+  window.fetch = function (url, opts) {
+    var started = Date.now();
+    var target = typeof url === "string" ? url : (url && url.url) || String(url);
+    if (opts && opts.body) {
+      var n = 1;
+      try {
+        var parsed = JSON.parse(opts.body);
+        if (Array.isArray(parsed)) n = parsed.length;                    // old payload shape
+        else if (Array.isArray(parsed.p_events)) n = parsed.p_events.length; // batched shape
+      } catch (e) {}
+      write("net", "→ POST", target + "  (" + n + " event" + (n === 1 ? "" : "s") + ")");
+    }
+    return nativeFetch(url, opts).then(function (res) {
+      var ms = Date.now() - started;
+      return res.clone().text().then(function (body) {
+        write(res.ok ? "net" : "error", "← " + res.status, ms + "ms  " + (body || "(empty body)"));
+        return res;
+      }).catch(function () {
+        write("net", "← " + res.status, ms + "ms");
+        return res;
+      });
+    }).catch(function (err) {
+      write("error", "← NETWORK", (Date.now() - started) + "ms  " + err.message);
+      throw err;
+    });
+  };
+
+  // ---- SDK loading --------------------------------------------------------
+  function currentSrc() {
+    return $("srcUrl").value.trim();
+  }
+
+  // The preset only fills the URL box — the box is what actually gets loaded,
+  // so any branch or commit URL can be pasted over it.
+  $("src").addEventListener("change", function () {
+    $("srcUrl").value = $("src").value;
+    save();
+  });
+
+  function setEnabled(on) {
+    ["init", "identify", "track", "trackBurst", "flush", "restart"].forEach(function (id) {
+      $(id).disabled = !on;
+    });
+  }
+
+  // Report which project the loaded build actually writes to — the constants are
+  // hardcoded per build, so this is the only way to be sure before tracking.
+  function reportTarget(source) {
+    nativeFetch(source).then(function (r) { return r.text(); }).then(function (code) {
+      var m = code.match(/https:\/\/([a-z0-9]+)\.supabase\.co/);
+      var el = $("target");
+      if (!m) { el.textContent = "loaded — target unknown"; return; }
+      var ref = m[1];
+      var known = { xfjgmzwigomtfmaloeun: ["PROD", "prod"], tqrwkscxilrwnbwlrkpa: ["DEV", "dev"] };
+      var label = known[ref] || [ref, ""];
+      el.className = "target " + label[1];
+      el.innerHTML = "writes to <b>" + label[0] + "</b> · " + ref + ".supabase.co";
+      write("sys", "TARGET", "this build posts to " + ref + ".supabase.co  (" + label[0] + ")");
+    }).catch(function (e) {
+      write("warn", "TARGET", "could not read build to determine target: " + e.message);
+    });
+  }
+
+  $("load").addEventListener("click", function () {
+    var source = currentSrc();
+    if (!source) { write("error", "LOAD", "pick a build or enter a URL first"); return; }
+    write("sys", "LOAD", source);
+    var s = document.createElement("script");
+    s.src = source;
+    s.onload = function () {
+      if (typeof window.CustomerCatalyst !== "function") {
+        write("error", "LOAD", "script loaded but window.CustomerCatalyst is missing");
+        return;
+      }
+      write("sys", "LOAD", "ok — window.CustomerCatalyst is available");
+      $("status").textContent = "SDK loaded. Initialise with an API key.";
+      setEnabled(true);
+      reportTarget(source);
+    };
+    s.onerror = function () {
+      write("error", "LOAD", "failed to fetch " + source + " (check the URL, or CSP/CORS if serving from file://)");
+    };
+    document.head.appendChild(s);
+  });
+
+  // ---- SDK actions --------------------------------------------------------
+  function guard(label, fn) {
+    try { fn(); } catch (e) { write("error", label, e.message); }
+  }
+
+  $("init").addEventListener("click", function () {
+    guard("init", function () {
+      cc = new window.CustomerCatalyst($("apiKey").value.trim());
+      save();
+      $("status").textContent = "Initialised. Identify a customer next.";
+    });
+  });
+
+  $("identify").addEventListener("click", function () {
+    if (!cc) return write("error", "identify", "call new CustomerCatalyst() first");
+    guard("identify", function () {
+      cc.identify({
+        customerId: $("customerId").value.trim(),
+        customerName: $("customerName").value.trim() || undefined
+      });
+      save();
+      $("status").textContent = "Identified. Ready to track.";
+    });
+  });
+
+  function metadata() {
+    var raw = $("metadata").value.trim();
+    if (!raw) return undefined;
+    try { return JSON.parse(raw); }
+    catch (e) { write("error", "metadata", "invalid JSON — sending without it: " + e.message); return undefined; }
+  }
+
+  $("track").addEventListener("click", function () {
+    if (!cc) return write("error", "track", "call new CustomerCatalyst() first");
+    guard("track", function () {
+      cc.track($("eventType").value.trim(), Number($("value").value), metadata());
+      save();
+    });
+  });
+
+  $("trackBurst").addEventListener("click", function () {
+    if (!cc) return write("error", "track", "call new CustomerCatalyst() first");
+    var n = Math.max(1, Number($("burst").value) || 1);
+    write("sys", "BURST", "queueing " + n + " events");
+    guard("track", function () {
+      for (var i = 0; i < n; i++) {
+        var meta = metadata() || {};
+        meta.burst_index = i + 1;
+        cc.track($("eventType").value.trim(), Number($("value").value), meta);
+      }
+    });
+  });
+
+  $("flush").addEventListener("click", function () {
+    if (!cc) return write("error", "flush", "call new CustomerCatalyst() first");
+    guard("flush", function () { cc.flush(); });
+  });
+
+  $("restart").addEventListener("click", function () {
+    if (!cc) return write("error", "restart", "call new CustomerCatalyst() first");
+    guard("restart", function () { cc.restart(); });
+  });
+
+  $("errNoKey").addEventListener("click", function () {
+    if (typeof window.CustomerCatalyst !== "function") return write("error", "assert", "load the SDK first");
+    try { new window.CustomerCatalyst(); write("error", "assert", "FAIL — no error thrown"); }
+    catch (e) { write("sys", "assert", "pass — threw: " + e.message); }
+  });
+
+  $("errNoIdent").addEventListener("click", function () {
+    if (typeof window.CustomerCatalyst !== "function") return write("error", "assert", "load the SDK first");
+    try {
+      new window.CustomerCatalyst("probe_key").track("x");
+      write("error", "assert", "FAIL — no error thrown");
+    } catch (e) { write("sys", "assert", "pass — threw: " + e.message); }
+  });
+
+  // ---- misc ---------------------------------------------------------------
+  $("clear").addEventListener("click", function () { logEl.innerHTML = ""; });
+  $("copy").addEventListener("click", function () {
+    navigator.clipboard.writeText(logEl.innerText).then(function () {
+      $("status").textContent = "Log copied to clipboard.";
+    });
+  });
+
+  var FIELDS = ["src", "srcUrl", "apiKey", "customerId", "customerName", "eventType", "value", "burst", "metadata"];
+  function save() {
+    var out = {};
+    FIELDS.forEach(function (f) { out[f] = $(f).value; });
+    try { localStorage.setItem("cc-console", JSON.stringify(out)); } catch (e) {}
+  }
+  function restore() {
+    try {
+      var saved = JSON.parse(localStorage.getItem("cc-console") || "{}");
+      FIELDS.forEach(function (f) { if (saved[f] != null) $(f).value = saved[f]; });
+    } catch (e) {}
+    if (!$("srcUrl").value) $("srcUrl").value = $("src").value;
+  }
+  restore();
+  FIELDS.forEach(function (f) { $(f).addEventListener("change", save); });
+
+  write("sys", "READY", "console attached — pick a build and press Load SDK");
+})();
+</script>
+
+</body>
+</html>

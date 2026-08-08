@@ -15,15 +15,37 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const okResp = n => ({ ok: true, text: async () => '', json: async () => ({ success: true, received: n, accepted: n, inserted: n, duplicates: 0, rejected: 0 }) });
 const errResp = s => ({ ok: false, status: s, text: async () => 'error ' + s, json: async () => null });
 
-// Each load gets a fresh copy of the module, so queue state never leaks between checks.
-function load(fetchImpl, beaconImpl) {
+// Some checks need a shorter backoff or a lower attempt ceiling — proving that
+// retries terminate takes 81 seconds at the shipped values. The shipped file has
+// no override hook on purpose: anything reachable from the page (a mutable
+// LIMITS on the global, or a free identifier that falls through the scope chain
+// to window) lets a co-located script raise the caps for every organisation.
+// So rewrite the literals in the source text instead. Asserted, so renaming a
+// limit fails loudly here rather than silently testing production numbers.
+function withLimits(src, overrides) {
+  Object.keys(overrides).forEach(k => {
+    const re = new RegExp('(' + k + ':\\s*)\\d+');
+    if (!re.test(src)) throw new Error('limit not found in source: ' + k);
+    src = src.replace(re, '$1' + overrides[k]);
+  });
+  return src;
+}
+
+// Each load gets a fresh copy of the module, so queue state never leaks between
+// checks. `fetch` is passed as a parameter rather than set on `global`: a module
+// from an earlier check keeps its retry timers running, and with a shared global
+// those late retries land on the *current* check's stub and corrupt its counts.
+// As a parameter it shadows the global inside the module body, so each copy can
+// only ever call its own.
+function load(fetchImpl, beaconImpl, limits) {
   const listeners = {};
   const on = (n, fn) => { (listeners[n] = listeners[n] || []).push(fn); };
   const w = { addEventListener: on, crypto: require('crypto').webcrypto };
   const d = { addEventListener: on, visibilityState: 'visible' };
   const nav = beaconImpl === 'none' ? {} : { sendBeacon: beaconImpl || (() => true) };
-  global.fetch = fetchImpl || (async () => okResp(1));
-  new Function('window', 'document', 'navigator', SRC)(w, d, nav);
+  const f = fetchImpl || (async () => okResp(1));
+  const src = limits ? withLimits(SRC, limits) : SRC;
+  new Function('window', 'document', 'navigator', 'fetch', src)(w, d, nav, f);
   return {
     CC: w.CustomerCatalyst,
     hide: () => { d.visibilityState = 'hidden'; (listeners['visibilitychange'] || []).forEach(f => f()); }
@@ -91,12 +113,100 @@ function load(fetchImpl, beaconImpl) {
   }
 
   // --- error classification -------------------------------------------------
-  for (const [status, fatal] of [[400, true], [401, true], [403, true], [408, false], [429, false], [500, false]]) {
+  // Only a credential failure stops a key. 400/413/422 mean "this payload is
+  // bad", not "this key is bad" — dropping the batch there is what keeps a
+  // malformed request from taking an organisation's tracking down completely.
+  for (const [status, fatal] of [[401, true], [403, true], [404, true],
+                                 [400, false], [413, false], [422, false],
+                                 [408, false], [429, false], [500, false]]) {
     const { CC } = load(async () => errResp(status));
     const cc = new CC('key' + status); cc.identify({ customerId: 'c1' });
     cc.track('x', 1);
     await sleep(500);
-    check(status + ' is ' + (fatal ? 'fatal' : 'retried'), cc.isStopped === fatal);
+    check(status + ' is ' + (fatal ? 'fatal' : 'not fatal'), cc.isStopped === fatal);
+  }
+
+  // --- a rejected batch is dropped, not retried, and not fatal ---------------
+  {
+    let calls = 0;
+    const { CC } = load(async () => { calls++; return errResp(400); });
+    const cc = new CC('org_400'); cc.identify({ customerId: 'c1' });
+    cc.track('x', 1);
+    await sleep(800);
+    check('a 400 does not stop the key', !cc.isStopped);
+    check('a 400 batch is not retried', calls === 1, calls + ' call(s)');
+    check('a dropped batch is counted', cc.stats.droppedEvents === 1 && cc.stats.droppedBatches === 1,
+      JSON.stringify(cc.stats));
+    check('the queue is left empty after a drop', cc.stats.queued === 0);
+  }
+
+  // --- a bad batch does not block the events behind it ----------------------
+  {
+    let delivered = 0;
+    const { CC } = load(async (u, o) => {
+      const n = JSON.parse(o.body).p_events.length;
+      if (JSON.parse(o.body).p_events[0].event_type === 'poison') return errResp(400);
+      delivered += n; return okResp(n);
+    });
+    const cc = new CC('org_mix'); cc.identify({ customerId: 'c1' });
+    cc.track('poison', 1);
+    await sleep(300);
+    cc.track('good', 1);
+    await sleep(800);
+    check('a good event still lands after a rejected batch', delivered === 1, delivered + ' delivered');
+    check('only the bad batch was dropped', cc.stats.droppedEvents === 1);
+  }
+
+  // --- the retry re-queue respects the queue cap ----------------------------
+  // track() refuses to push past maxQueueLength, but the retry path concatenates
+  // straight onto the queue and bypasses that check. Reproducing it needs the
+  // queue refilled to the cap WHILE a batch is on the wire, so the failed batch
+  // comes back to an already-full queue — hence the gated fetch.
+  {
+    let release;
+    const gate = new Promise(function(r) { release = r; });
+    const { CC } = load(async () => { await gate; return errResp(500); }, undefined,
+      { maxQueueLength: 10, maxBatchSize: 5, maxBackoffMs: 20, maxAttempts: 50 });
+    const cc = new CC('org_cap'); cc.identify({ customerId: 'c1' });
+    cc.track('first', 1);              // one event goes in flight and blocks on the gate
+    await sleep(50);
+    for (let i = 0; i < 10; i++) cc.track('e' + i, 1);   // refill to the cap behind it
+    release();                          // now let the in-flight batch fail and requeue
+    await sleep(400);
+    check('the retry re-queue does not exceed the queue cap',
+      cc.stats.queued <= 10, cc.stats.queued + ' queued');
+    check('the overflow is counted rather than silently lost',
+      cc.stats.droppedEvents >= 1, JSON.stringify(cc.stats));
+  }
+
+  // --- retries are bounded --------------------------------------------------
+  // With the real backoff this takes 81s of waiting, so shrink the ceiling and
+  // the cap. What is being proved is that it terminates, not how long it takes.
+  {
+    let calls = 0;
+    const { CC } = load(async () => { calls++; return errResp(500); }, undefined,
+      { maxAttempts: 3, maxBackoffMs: 50 });
+    const cc = new CC('org_500'); cc.identify({ customerId: 'c1' });
+    cc.track('x', 1);
+    await sleep(1000);
+    check('a permanently failing batch is eventually given up on',
+      cc.stats.droppedEvents === 1, JSON.stringify(cc.stats));
+    check('it stops calling once given up', calls === 3, calls + ' call(s)');
+    check('giving up does not stop the key', !cc.isStopped);
+    check('nothing is left queued after giving up', cc.stats.queued === 0);
+  }
+
+  // --- a 200 reporting failure is retried, then given up on -----------------
+  {
+    const { CC } = load(async () => ({
+      ok: true, text: async () => '',
+      json: async () => ({ success: false, error: 'nope' })
+    }), undefined, { maxAttempts: 3, maxBackoffMs: 50 });
+    const cc = new CC('org_softfail'); cc.identify({ customerId: 'c1' });
+    cc.track('x', 1);
+    await sleep(1000);
+    check('success:false is given up on rather than looping forever',
+      cc.stats.droppedEvents === 1, JSON.stringify(cc.stats));
   }
 
   // --- one key's outage must not affect another ----------------------------
@@ -119,9 +229,9 @@ function load(fetchImpl, beaconImpl) {
     let healthy = 0;
     const { CC } = load(async (u, o) => {
       const b = JSON.parse(o.body);
-      if (b.p_api_key === 'bad') return errResp(400);
-      // Count only this check's key: an earlier check leaves retry timers
-      // running that still reach whatever global fetch is current.
+      // 401, not 400: only a credential failure is fatal now, and this check is
+      // about a fatal error being contained to one key.
+      if (b.p_api_key === 'bad') return errResp(401);
       if (b.p_api_key === 'good') healthy += b.p_events.length;
       return okResp(b.p_events.length);
     });

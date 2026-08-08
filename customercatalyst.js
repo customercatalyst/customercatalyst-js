@@ -16,9 +16,19 @@
     maxBatchBytes: 28000,   // server refuses over 32768; leave room for the envelope
     maxQueueLength: 1000,   // an unreachable endpoint must not grow memory forever
     maxBackoffMs: 30000,
+    maxAttempts: 10,        // a batch that keeps failing is dropped, not retried forever
     maxFlushWaitMs: 5000,   // flush() must never hang a page navigation
     maxFieldLength: 255     // server drops anything longer
   };
+
+  // There is deliberately no way to override these at runtime. The suite needs
+  // smaller values to prove retries terminate without waiting 81 seconds, and it
+  // gets them by rewriting the literals above before evaluating this file — not
+  // through any hook that ships. Both a mutable `CustomerCatalyst.LIMITS` and a
+  // free `__ccTestLimits` identifier were tried and rejected: either lets a
+  // script sharing the customer's page raise the rate and queue caps for every
+  // organisation on it. A free identifier is not private — its scope chain ends
+  // at the global object.
 
   // Queue state is module-level so that one page sending from two instances
   // still paces itself as a whole. Each item carries its own key, so events are
@@ -39,6 +49,18 @@
   // Stopping is tracked per key, not per instance: two instances sharing one
   // queue must not be able to discard each other's events.
   const stoppedKeys = new Set();
+
+  // Dropping a batch is quieter than stopping a key, which is the point — but a
+  // silent loss is worse than a loud one, so every drop is counted and readable
+  // through `stats`. Per key, like every other counter here.
+  const droppedByKey = new Map();
+
+  function recordDrop(key, eventCount) {
+    const d = droppedByKey.get(key) || { events: 0, batches: 0 };
+    d.events += eventCount;
+    d.batches += 1;
+    droppedByKey.set(key, d);
+  }
 
   function stopKey(key) {
     stoppedKeys.add(key);
@@ -115,6 +137,32 @@
     return items.map(function(item) { return item.event; });
   }
 
+  // Three outcomes, not two. The middle one is why this exists: a batch the
+  // server refuses to accept is not a credential problem, and treating it as one
+  // discarded every event the organisation had queued and took its tracking down
+  // until the next page load. Only a credential failure justifies stopping a key.
+  //
+  //   fatal → the key will never work again; stop it
+  //   drop  → this payload is bad; throw the batch away and carry on
+  //   retry → transient; put it back and back off
+  function classifyError(error) {
+    const status = error.status;
+
+    // No status means a network failure, or the server reporting failure in a
+    // 200 body. Both can succeed later — but see maxAttempts: "later" is bounded.
+    if (typeof status !== 'number') return 'retry';
+
+    if (status === 401 || status === 403 || status === 404) return 'fatal';
+
+    // Malformed, too large, or unprocessable. Retrying is pointless: the same
+    // bytes will be refused again. The next batch may be perfectly fine.
+    if (status === 400 || status === 413 || status === 422) return 'drop';
+
+    // 408, 429, 5xx, and anything unrecognised. Unrecognised leans retry because
+    // the attempt ceiling makes guessing wrong cheap, while dropping is final.
+    return 'retry';
+  }
+
   class CustomerCatalyst {
     constructor(apiKey) {
       if (typeof apiKey !== 'string' || apiKey === '') {
@@ -128,6 +176,19 @@
 
     get isStopped() {
       return stoppedKeys.has(this.apiKey);
+    }
+
+    // Dropping a batch keeps the SDK alive, which is right — but it is still
+    // data loss, and loss nobody can see is the worst kind. This is how anyone
+    // finds out it happened.
+    get stats() {
+      const self = this;
+      const dropped = droppedByKey.get(this.apiKey) || { events: 0, batches: 0 };
+      return {
+        queued: eventQueue.filter(function(item) { return item.key === self.apiKey; }).length,
+        droppedEvents: dropped.events,
+        droppedBatches: dropped.batches
+      };
     }
 
     identify(options) {
@@ -215,7 +276,9 @@
       } catch (error) {
         console.error('[CustomerCatalyst] Failed to send events:', error.message);
 
-        if (this._isFatalError(error)) {
+        const outcome = classifyError(error);
+
+        if (outcome === 'fatal') {
           console.error('[CustomerCatalyst] Fatal error detected. Stopping SDK for this API key.');
           // Only this key's events are discarded — another instance on the page
           // may be sending under a key that is perfectly healthy.
@@ -235,13 +298,57 @@
           return;
         }
 
-        failuresByKey.set(batch.key, (failuresByKey.get(batch.key) || 0) + 1);
-        console.warn('[CustomerCatalyst] Retryable error. Events will be retried.');
-        // Back of the queue, not the front. Re-claiming the front meant a key
-        // whose endpoint was failing held position zero on every retry forever,
-        // starving every other key on the page and eventually pushing their
-        // events out against the shared queue cap.
-        eventQueue = eventQueue.concat(batch.items);
+        if (outcome === 'drop') {
+          recordDrop(batch.key, batch.items.length);
+          console.error('[CustomerCatalyst] Server rejected the batch — dropping ' +
+            batch.items.length + ' event(s) and continuing');
+          // Not the key's fault, so no backoff: the next batch may be fine and
+          // there is no reason to slow it down.
+          failuresByKey.delete(batch.key);
+        } else {
+          failuresByKey.set(batch.key, (failuresByKey.get(batch.key) || 0) + 1);
+
+          // A batch that can never succeed — a permanently unreachable endpoint,
+          // or a server reporting failure on every attempt — would otherwise cycle
+          // at the backoff cap for as long as the tab stays open.
+          const retryable = [];
+          let exhausted = 0;
+          batch.items.forEach(function(item) {
+            item.attempts = (item.attempts || 0) + 1;
+            if (item.attempts >= LIMITS.maxAttempts) exhausted++;
+            else retryable.push(item);
+          });
+
+          if (exhausted > 0) {
+            recordDrop(batch.key, exhausted);
+            console.error('[CustomerCatalyst] Giving up on ' + exhausted + ' event(s) after ' +
+              LIMITS.maxAttempts + ' attempts');
+          }
+          if (retryable.length > 0) {
+            console.warn('[CustomerCatalyst] Retryable error. Events will be retried.');
+          }
+
+          // Back of the queue, not the front. Re-claiming the front meant a key
+          // whose endpoint was failing held position zero on every retry forever,
+          // starving every other key on the page and eventually pushing their
+          // events out against the shared queue cap.
+          eventQueue = eventQueue.concat(retryable);
+
+          // track() caps the queue on the way in, but a re-queue bypasses that
+          // check — without this the cap can be exceeded by a batch's worth.
+          // Never trim more than we just appended: the re-queued items sit at the
+          // tail and all belong to batch.key, so capping at retryable.length keeps
+          // the drop inside this organisation. Taking the whole overflow could eat
+          // another key's backlog while reporting the loss against this one — the
+          // queue can be over cap from a path other than this concat (sendPending
+          // merges the in-flight batch back to the front on tab hide).
+          const over = Math.min(eventQueue.length - LIMITS.maxQueueLength, retryable.length);
+          if (over > 0) {
+            eventQueue.length = eventQueue.length - over;
+            recordDrop(batch.key, over);
+            console.warn('[CustomerCatalyst] Queue is full — dropped ' + over + ' re-queued event(s)');
+          }
+        }
       } finally {
         inFlight = null;
         inFlightKey = null;
@@ -261,14 +368,6 @@
         isProcessing = false;
         settleDrain();
       }
-    }
-
-    _isFatalError(error) {
-      if (typeof error.status !== 'number') return false;
-      // Throttling and request timeouts are the retryable 4xx — treating them
-      // as fatal would discard the whole queue over a passing traffic spike.
-      if (error.status === 408 || error.status === 429) return false;
-      return error.status >= 400 && error.status < 500;
     }
 
     async _sendEvents(apiKey, events) {

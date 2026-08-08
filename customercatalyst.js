@@ -62,9 +62,19 @@
     droppedByKey.set(key, d);
   }
 
-  function stopKey(key) {
+  // `inFlightCount` is the batch already on the wire: takeBatch removed it from
+  // the queue, so the filter below cannot see it, and it is lost with the rest.
+  // Counted here rather than at the call site so one fatal event produces one
+  // drop record instead of two.
+  function stopKey(key, inFlightCount) {
     stoppedKeys.add(key);
     failuresByKey.delete(key);
+    // Discarding the backlog is correct — a dead credential cannot send it — but
+    // it is still the largest loss the SDK can inflict, so count it. isStopped
+    // says something was lost; only this says how much.
+    const lost = eventQueue.filter(function(item) { return item.key === key; }).length +
+      (inFlightCount || 0);
+    if (lost > 0) recordDrop(key, lost);
     eventQueue = eventQueue.filter(function(item) { return item.key !== key; });
   }
 
@@ -282,7 +292,15 @@
           console.error('[CustomerCatalyst] Fatal error detected. Stopping SDK for this API key.');
           // Only this key's events are discarded — another instance on the page
           // may be sending under a key that is perfectly healthy.
-          stopKey(batch.key);
+          //
+          // Pass the in-flight count ONLY if the batch is still on the wire. If
+          // the page was hidden during the request, sendPending() has already
+          // taken these items back — either folding them into the queue, where
+          // stopKey's own filter will count them, or sending them by beacon, in
+          // which case they were not lost at all. Both cases clear inFlightItems,
+          // so it is the discriminator: counting batch.items unconditionally
+          // would double-count the first and invent losses in the second.
+          stopKey(batch.key, inFlightItems.length > 0 ? batch.items.length : 0);
           inFlight = null;
           inFlightKey = null;
           inFlightItems = [];

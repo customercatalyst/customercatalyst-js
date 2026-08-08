@@ -157,6 +157,46 @@ function load(fetchImpl, beaconImpl, limits) {
     check('only the bad batch was dropped', cc.stats.droppedEvents === 1);
   }
 
+  // --- stopping a key counts what it throws away ---------------------------
+  // Discarding the backlog is right when the credential is dead, but it is the
+  // largest loss the SDK can inflict. The batch on the wire counts too: takeBatch
+  // already removed it from the queue, so stopKey's filter cannot see it.
+  {
+    let release;
+    const gate = new Promise(function(r) { release = r; });
+    const { CC } = load(async () => { await gate; return errResp(401); });
+    const cc = new CC('org_stop'); cc.identify({ customerId: 'c1' });
+    cc.track('inflight', 1);           // this one goes on the wire and blocks
+    await sleep(50);
+    for (let i = 0; i < 4; i++) cc.track('queued' + i, 1);   // these stay queued
+    release();
+    await sleep(300);
+    check('a stopped key is marked stopped', cc.isStopped);
+    check('stopping a key counts the queued events it discarded',
+      cc.stats.droppedEvents === 5, JSON.stringify(cc.stats));
+    check('nothing is left queued after stopping', cc.stats.queued === 0);
+  }
+
+  // --- hiding the page mid-request must not double-count the loss -----------
+  // sendPending() folds the in-flight batch back into the queue, so if the
+  // request then fails fatally, stopKey's own filter already sees those items.
+  // Adding the in-flight count on top would report more lost than existed.
+  {
+    let release;
+    const gate = new Promise(function(r) { release = r; });
+    const { CC, hide } = load(async () => { await gate; return errResp(401); },
+      () => false);                    // every beacon refused, so nothing leaves
+    const cc = new CC('org_hide'); cc.identify({ customerId: 'c1' });
+    cc.track('inflight', 1);
+    await sleep(50);
+    for (let i = 0; i < 4; i++) cc.track('queued' + i, 1);
+    hide();                            // folds the in-flight item back in
+    release();                         // now the request fails fatally
+    await sleep(300);
+    check('a fatal stop after a page hide counts each event once',
+      cc.stats.droppedEvents === 5, JSON.stringify(cc.stats));
+  }
+
   // --- the retry re-queue respects the queue cap ----------------------------
   // track() refuses to push past maxQueueLength, but the retry path concatenates
   // straight onto the queue and bypasses that check. Reproducing it needs the

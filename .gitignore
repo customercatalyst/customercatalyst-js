@@ -8,3 +8,5 @@ customercatalyst.dev.js
 customercatalyst-test-sdk.js
 dist/
 .wrangler/
+CLAUDE.md
+.claude/

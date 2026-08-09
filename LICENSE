@@ -1,0 +1,21 @@
+Copyright © 2026 CustomerCatalyst. All rights reserved.
+
+This software and its source code are proprietary and confidential. They are
+provided solely for use by CustomerCatalyst customers to integrate with the
+CustomerCatalyst service.
+
+Subject to the terms above, permission is granted to load, embed, and use the
+distributed file (customercatalyst.js) on your own web properties for the
+purpose of sending usage events to CustomerCatalyst.
+
+You may not copy, modify, merge, publish, redistribute, sublicense, sell, or
+create derivative works of this software, in whole or in part, except as
+expressly permitted in a written agreement with CustomerCatalyst.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

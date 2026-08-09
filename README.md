@@ -490,6 +490,6 @@ Works in all modern browsers:
 
 ## License
 
-Proprietary. © 2025 CustomerCatalyst. All rights reserved.
+Proprietary. © 2026 CustomerCatalyst. All rights reserved.
 
 This SDK is provided for use by CustomerCatalyst customers only.

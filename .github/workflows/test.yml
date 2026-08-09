@@ -1,0 +1,19 @@
+name: test
+
+# The suite is the entire quality gate for this repo (no other CI). It must be
+# green before anything reaches cdn.customercatalyst.io, which deploys on push.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # No dependencies, no install step — the harness is dependency-free.
+      - run: node test.js

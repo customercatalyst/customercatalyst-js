@@ -7,7 +7,7 @@
 
   // A beacon cannot set headers, so the publishable key travels in the query
   // string instead. Same gateway auth, different carrier. The organisation key
-  // never goes in a URL — it stays in the request body.
+  // never goes in a URL: it stays in the request body.
   const BEACON_ENDPOINT = API_ENDPOINT + '?apikey=' + encodeURIComponent(SUPABASE_PUBLISHABLE_KEY);
 
   const LIMITS = {
@@ -21,17 +21,17 @@
     maxAttempts: 10,         // a batch that keeps failing is dropped, not retried forever
     maxFlushWaitMs: 5000,    // flush() must never hang a page navigation
     maxFieldLength: 255,     // server drops anything longer
-    maxRetryAfterMs: 300000, // cap on honouring a 429's Retry-After — see parseRetryAfter
+    maxRetryAfterMs: 300000, // cap on honouring a 429's Retry-After (see parseRetryAfter)
     lingerMs: 50             // coalesces a burst on an empty queue into one batch
   };
 
   // There is deliberately no way to override these at runtime. The suite needs
   // smaller values to prove retries terminate without waiting 81 seconds, and it
-  // gets them by rewriting the literals above before evaluating this file — not
+  // gets them by rewriting the literals above before evaluating this file, not
   // through any hook that ships. Both a mutable `CustomerCatalyst.LIMITS` and a
   // free `__ccTestLimits` identifier were tried and rejected: either lets a
   // script sharing the customer's page raise the rate and queue caps for every
-  // organisation on it. A free identifier is not private — its scope chain ends
+  // organisation on it. A free identifier is not private: its scope chain ends
   // at the global object.
 
   // Queue state is module-level so that one page sending from two instances
@@ -41,24 +41,24 @@
   let isProcessing = false;
   let inFlight = null;
   let inFlightKey = null;
-  let inFlightItems = [];   // the batch on the wire — already out of the queue,
+  let inFlightItems = [];   // the batch on the wire (already out of the queue),
                             // so the beacon has to be told about it separately
   let lastRequestTime = 0;
   let drainWaiters = [];
   let lingerTimer = null;   // pending "wait for a burst before the first send" timer;
                             // flush() cancels it instead of waiting it out
   let processTimer = null; // pending _processQueue() retry/wait timer, whatever the
-                            // reason for the wait — null while a request is actually
+                            // reason for the wait: null while a request is actually
                             // in flight (that wait is an awaited promise, not a timer).
                             // track() cancels and re-fires it when a freshly queued
                             // event's key is not one of the ones the current wait is
-                            // for — see the comment at that check.
+                            // for (see the comment at that check).
 
   // Backoff is counted per key. A shared counter let one organisation's healthy
   // traffic reset the backoff another had earned from real failures.
   const failuresByKey = new Map();
 
-  // Epoch ms per key when sending may resume — a single persisted fact,
+  // Epoch ms per key when sending may resume: a single persisted fact,
   // written by whichever of the two waits currently applies: a 429's
   // Retry-After, or the exponential-backoff delay computed from
   // failuresByKey. Both answer the same question ("this key must not send
@@ -80,7 +80,7 @@
   // queue must not be able to discard each other's events.
   const stoppedKeys = new Set();
 
-  // Dropping a batch is quieter than stopping a key, which is the point — but a
+  // Dropping a batch is quieter than stopping a key, which is the point, but a
   // silent loss is worse than a loud one, so every drop is counted and readable
   // through `stats`. Per key, like every other counter here.
   const droppedByKey = new Map();
@@ -100,7 +100,7 @@
     stoppedKeys.add(key);
     failuresByKey.delete(key);
     notBeforeByKey.delete(key);
-    // Discarding the backlog is correct — a dead credential cannot send it — but
+    // Discarding the backlog is correct (a dead credential cannot send it), but
     // it is still the largest loss the SDK can inflict, so count it. isStopped
     // says something was lost; only this says how much.
     const lost = eventQueue.filter(function(item) { return item.key === key; }).length +
@@ -118,7 +118,7 @@
   // Every limit here is in BYTES, because that is what the server and the beacon
   // budget count. String.length counts UTF-16 code units, which equals bytes only
   // for ASCII: "ü" is one unit and two bytes, an emoji is two units and four. A
-  // .length guard therefore passes payloads the server then refuses — and a
+  // .length guard therefore passes payloads the server then refuses, and a
   // refusal used to stop the organisation's tracking outright.
   const textEncoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
 
@@ -132,12 +132,12 @@
   // Same class of error as THE UNIT RULE above, one layer up: the server
   // counts customer_id/event_type with Postgres length(), which counts
   // characters (code points), while String.prototype.length counts UTF-16
-  // code units — equal only for the BMP. An emoji is one code point but two
+  // code units, equal only for the BMP. An emoji is one code point but two
   // units, so a 200-emoji string reads as 400 against a 255 .length guard
   // and gets rejected client-side even though the server would accept it.
   //
   // Array.from(str).length counts code points correctly, but it allocates
-  // one array element per code point — fine for a 255-character field, not
+  // one array element per code point: fine for a 255-character field, not
   // for a caller who passes a 10MB string. Code points <= UTF-16 units <= 2x
   // code points, so the cheap .length check below filters those out first;
   // Array.from only ever runs on a string already known to be at most
@@ -158,18 +158,18 @@
   }
 
   // Rejecting unusable metadata here, where the customer's data enters, keeps a
-  // value that cannot be serialised from throwing later inside the send loop —
+  // value that cannot be serialised from throwing later inside the send loop,
   // which would jam the queue behind an event that can never leave it.
   function safeMetadata(metadata) {
     if (metadata === null || metadata === undefined) return null;
     if (typeof metadata !== 'object' || Array.isArray(metadata)) {
-      console.warn('[CustomerCatalyst] metadata must be a plain object — ignoring it');
+      console.warn('[CustomerCatalyst] metadata must be a plain object, ignoring it');
       return null;
     }
     try {
       JSON.stringify(metadata);
     } catch (e) {
-      console.warn('[CustomerCatalyst] metadata could not be serialised — ignoring it');
+      console.warn('[CustomerCatalyst] metadata could not be serialised, ignoring it');
       return null;
     }
     return metadata;
@@ -181,22 +181,22 @@
   function safeValue(value) {
     if (value === undefined || value === null) return 1;
     if (typeof value !== 'number' || !isFinite(value) || value < 0) {
-      console.warn('[CustomerCatalyst] value must be a non-negative number — using 1 instead of', value);
+      console.warn('[CustomerCatalyst] value must be a non-negative number, using 1 instead of', value);
       return 1;
     }
     return Math.round(value * 1000000) / 1000000;
   }
 
   // Takes only consecutive events belonging to one organisation, so a batch is
-  // always sendable with a single key, and stops before the server's byte limit
-  // — exceeding it returns a 400, which would otherwise look fatal.
+  // always sendable with a single key, and stops before the server's byte limit:
+  // exceeding it returns a 400, which would otherwise look fatal.
   //
   // start defaults to 0 (the overwhelmingly common single-key-at-the-head
   // case, and every caller except the skip-ahead path in _processQueue).
   // Splicing at a fixed index rather than shifting works for any start: each
   // removal shifts the next item down into that same slot, so re-reading
   // eventQueue[start] on every iteration walks forward through the run
-  // exactly like the old eventQueue[0]/shift() pair did at start 0 — items
+  // exactly like the old eventQueue[0]/shift() pair did at start 0; items
   // before start, parked or not, are never touched.
   function takeBatch(limit, start) {
     const i = start || 0;
@@ -217,9 +217,9 @@
 
   // The selection rule: send the first key that is allowed to send right
   // now, not whichever key happens to sit at the head. A key parked behind
-  // an unexpired notBeforeByKey entry — a 429's Retry-After or an
-  // exponential-backoff wait, whichever last set it — is skipped, in queue
-  // order, without ever reordering items within a key — items before and
+  // an unexpired notBeforeByKey entry (a 429's Retry-After or an
+  // exponential-backoff wait, whichever last set it) is skipped, in queue
+  // order, without ever reordering items within a key; items before and
   // after the skipped run keep their relative order untouched. Returns -1
   // when every queued key is currently parked.
   function findSendableIndex() {
@@ -247,7 +247,7 @@
     const status = error.status;
 
     // No status means a network failure, or the server reporting failure in a
-    // 200 body. Both can succeed later — but see maxAttempts: "later" is bounded.
+    // 200 body. Both can succeed later, but see maxAttempts: "later" is bounded.
     if (typeof status !== 'number') return 'retry';
 
     if (status === 401 || status === 403 || status === 404) return 'fatal';
@@ -263,20 +263,20 @@
 
   // Clamped to [1s, maxRetryAfterMs]. This cap used to be the only thing
   // standing between one key's Retry-After and a second organisation's
-  // healthy events on the same page — the queue was paced by whichever key
+  // healthy events on the same page: the queue was paced by whichever key
   // sat at its head, so an un-clamped multi-minute wait from one key blocked
   // everyone behind it for just as long. That is no longer this cap's job:
   // findSendableIndex in _processQueue now skips a parked key for a sendable
   // one, so co-tenants are protected regardless of how long a single key
   // waits. What the cap still does is stop a garbage or hostile
-  // retry_after_seconds — the value comes from the response body, not
-  // something the SDK controls — from parking a key for hours on the
+  // retry_after_seconds (the value comes from the response body, not
+  // something the SDK controls) from parking a key for hours on the
   // strength of one number the server (or a spoofed response) chose to send.
   function clampRetryAfterMs(ms) {
     return Math.max(1000, Math.min(LIMITS.maxRetryAfterMs, ms));
   }
 
-  // Prefers the header, for any non-browser caller of this same file — but
+  // Prefers the header, for any non-browser caller of this same file, but
   // the header is not exposed cross-origin on this endpoint (verified
   // against the live response: Retry-After is absent from
   // Access-Control-Expose-Headers), so response.headers.get('Retry-After')
@@ -299,7 +299,7 @@
         return clampRetryAfterMs(body.retry_after_seconds * 1000);
       }
     } catch (e) {
-      // Not JSON — nothing to parse.
+      // Not JSON; nothing to parse.
     }
 
     return null;
@@ -320,7 +320,7 @@
       return stoppedKeys.has(this.apiKey);
     }
 
-    // Dropping a batch keeps the SDK alive, which is right — but it is still
+    // Dropping a batch keeps the SDK alive, which is right, but it is still
     // data loss, and loss nobody can see is the worst kind. This is how anyone
     // finds out it happened.
     get stats() {
@@ -363,20 +363,20 @@
       }
 
       if (eventQueue.length >= LIMITS.maxQueueLength) {
-        console.warn('[CustomerCatalyst] Queue is full (' + LIMITS.maxQueueLength + ') — dropping event');
+        console.warn('[CustomerCatalyst] Queue is full (' + LIMITS.maxQueueLength + '), dropping event');
         return;
       }
 
       // ponytail: recounted with a filter, like the `stats` getter above,
       // rather than kept as a running counter. A parallel counter needs
-      // updating at every mutation site — takeBatch, stopKey, both trim
-      // paths in _processQueue, and sendPending's merge-back — for a check
+      // updating at every mutation site: takeBatch, stopKey, both trim
+      // paths in _processQueue, and sendPending's merge-back, for a check
       // that only has to hold at these small (<=1000) queue sizes. O(n) per
       // track() is cheap here and much harder to get wrong than that.
       const self = this;
       const mine = eventQueue.filter(function(item) { return item.key === self.apiKey; }).length;
       if (mine >= LIMITS.maxQueuePerKey) {
-        console.warn('[CustomerCatalyst] Queue is full for this key (' + LIMITS.maxQueuePerKey + ') — dropping event');
+        console.warn('[CustomerCatalyst] Queue is full for this key (' + LIMITS.maxQueuePerKey + '), dropping event');
         return;
       }
 
@@ -393,19 +393,19 @@
       // +1 for the comma this event will need once it joins a batch array.
       const size = byteLength(JSON.stringify(event)) + 1;
       if (size > LIMITS.maxBatchBytes) {
-        console.warn('[CustomerCatalyst] Event is too large to send (' + size + ' bytes) — dropping it');
+        console.warn('[CustomerCatalyst] Event is too large to send (' + size + ' bytes), dropping it');
         return;
       }
 
       eventQueue.push({ key: this.apiKey, size: size, event: event });
-      debugLog('queued', eventType, 'for', redactKey(this.apiKey) + ' — queue depth', eventQueue.length);
+      debugLog('queued', eventType, 'for', redactKey(this.apiKey) + ', queue depth', eventQueue.length);
 
       if (!isProcessing) {
         // The empty→non-empty transition: wait lingerMs so a synchronous
         // burst of track() calls coalesces into one batch instead of each
         // firing its own request. isProcessing is set true here, before the
         // timer exists, so a track() call arriving during the wait sees it
-        // true and just enqueues — the same guard the rate-limit wait below
+        // true and just enqueues, the same guard the rate-limit wait below
         // relies on to stop concurrent calls from each scheduling their own
         // timer.
         isProcessing = true;
@@ -414,25 +414,25 @@
           self._processQueue();
         }, LIMITS.lingerMs);
       } else if (processTimer !== null) {
-        // A wait is already scheduled — for the rate limit, a backoff, or
+        // A wait is already scheduled: for the rate limit, a backoff, or
         // (see findSendableIndex) every currently queued key being parked.
         // That wait's target was computed from the queue as it stood a
         // moment ago; this event just changed the queue, and nothing else
         // re-checks it before the timer fires. Left alone, an event for a
         // key that was never parked could sleep behind another key's wait
-        // for however long that happened to be — up to maxRetryAfterMs —
+        // for however long that happened to be (up to maxRetryAfterMs),
         // exactly the head-of-line block findSendableIndex exists to avoid,
         // just triggered by a late arrival instead of one already queued.
         // Cancelling and re-running costs nothing when nothing has actually
         // changed: _processQueue() just re-derives the same wait and
-        // reschedules it. That is true by construction, not by luck — every
+        // reschedules it. That is true by construction, not by luck: every
         // wait this module can be sleeping on (rate limit, Retry-After,
         // exponential backoff) is either a pure function of the clock and
         // LIMITS, or persisted per key in notBeforeByKey before the timer
         // that will read it is ever scheduled. There is nowhere left a wait
         // can live only inside a setTimeout's argument, which is what would
         // make cancelling it lose information instead of just re-deriving
-        // it. (Left untouched while a request is genuinely in flight —
+        // it. (Left untouched while a request is genuinely in flight;
         // processTimer is null then, not a timer to cancel.)
         clearTimeout(processTimer);
         processTimer = null;
@@ -441,8 +441,8 @@
     }
 
     // Every setTimeout(..., () => this._processQueue()) inside this class goes
-    // through here so track() has one handle it can cancel — see the comment
-    // at processTimer's declaration for why that matters.
+    // through here so track() has one handle it can cancel (see the comment
+    // at processTimer's declaration for why that matters).
     _scheduleProcess(delay) {
       const self = this;
       processTimer = setTimeout(function() {
@@ -469,9 +469,9 @@
 
       const sendIndex = findSendableIndex();
       if (sendIndex === -1) {
-        // Every key currently queued is parked behind its own wait —
+        // Every key currently queued is parked behind its own wait:
         // Retry-After or backoff, notBeforeByKey does not distinguish once
-        // set. Sleep until the EARLIEST one clears, not the head's — the
+        // set. Sleep until the EARLIEST one clears, not the head's: the
         // head is just whichever item happens to sit at index 0, not
         // necessarily the key closest to being allowed to send again.
         let earliest = Infinity;
@@ -503,12 +503,12 @@
 
         if (outcome === 'fatal') {
           console.error('[CustomerCatalyst] Fatal error detected. Stopping SDK for this API key.');
-          // Only this key's events are discarded — another instance on the page
+          // Only this key's events are discarded; another instance on the page
           // may be sending under a key that is perfectly healthy.
           //
           // Pass the in-flight count ONLY if the batch is still on the wire. If
           // the page was hidden during the request, sendPending() has already
-          // taken these items back — either folding them into the queue, where
+          // taken these items back: either folding them into the queue, where
           // stopKey's own filter will count them, or sending them by beacon, in
           // which case they were not lost at all. Both cases clear inFlightItems,
           // so it is the discriminator: counting batch.items unconditionally
@@ -518,7 +518,7 @@
           inFlightKey = null;
           inFlightItems = [];
 
-          // Another key's events may still be queued behind this one — stopping
+          // Another key's events may still be queued behind this one; stopping
           // one organisation must not strand another's.
           if (eventQueue.length > 0) {
             this._scheduleProcess(minInterval);
@@ -531,7 +531,7 @@
 
         if (outcome === 'drop') {
           recordDrop(batch.key, batch.items.length);
-          console.error('[CustomerCatalyst] Server rejected the batch — dropping ' +
+          console.error('[CustomerCatalyst] Server rejected the batch, dropping ' +
             batch.items.length + ' event(s) and continuing');
           // Not the key's fault, so no backoff: the next batch may be fine and
           // there is no reason to slow it down.
@@ -542,7 +542,7 @@
 
           // This key must not send again before T. Compute T here, at the
           // moment the failure that earns it happens, and persist it in
-          // notBeforeByKey — not just as the delay of the setTimeout that
+          // notBeforeByKey, not just as the delay of the setTimeout that
           // paces the next _processQueue() call. A wait that exists only as
           // a timer argument is invisible to findSendableIndex and to a
           // second track() call arriving mid-wait, which is exactly the gap
@@ -550,14 +550,14 @@
           // (see the comment at notBeforeByKey's declaration).
           //
           // Set from the server's Retry-After when it gave one (a 429 with a
-          // parseable value) — that is more authoritative than a guess this
+          // parseable value); that is more authoritative than a guess this
           // module makes up. Otherwise fall back to the same equal-jitter
           // exponential schedule this module has always used: every tab
           // computing the same deterministic delay from the same failure
           // count would retry in lockstep and re-hammer a server that is
-          // trying to recover. Half of `temp` is a guaranteed floor — full
+          // trying to recover. Half of `temp` is a guaranteed floor: full
           // jitter (0..temp) trades that floor for a bit more spread, not
-          // worth it here — and the result never exceeds `temp`.
+          // worth it here, and the result never exceeds `temp`.
           if (error.retryAfterMs) {
             notBeforeByKey.set(batch.key, Date.now() + error.retryAfterMs);
             debugLog('retry-after for', redactKey(batch.key) + ':', error.retryAfterMs + 'ms');
@@ -568,8 +568,8 @@
             debugLog('backing off for', redactKey(batch.key) + ':', Math.round(delay) + 'ms (failure #' + failures + ')');
           }
 
-          // A batch that can never succeed — a permanently unreachable endpoint,
-          // or a server reporting failure on every attempt — would otherwise cycle
+          // A batch that can never succeed (a permanently unreachable endpoint,
+          // or a server reporting failure on every attempt) would otherwise cycle
           // at the backoff cap for as long as the tab stays open.
           const retryable = [];
           let exhausted = 0;
@@ -595,18 +595,18 @@
           eventQueue = eventQueue.concat(retryable);
 
           // track() caps the queue on the way in, but a re-queue bypasses that
-          // check — without this the cap can be exceeded by a batch's worth.
+          // check: without this the cap can be exceeded by a batch's worth.
           // Never trim more than we just appended: the re-queued items sit at the
           // tail and all belong to batch.key, so capping at retryable.length keeps
           // the drop inside this organisation. Taking the whole overflow could eat
-          // another key's backlog while reporting the loss against this one — the
+          // another key's backlog while reporting the loss against this one: the
           // queue can be over cap from a path other than this concat (sendPending
           // merges the in-flight batch back to the front on tab hide).
           const over = Math.min(eventQueue.length - LIMITS.maxQueueLength, retryable.length);
           if (over > 0) {
             eventQueue.length = eventQueue.length - over;
             recordDrop(batch.key, over);
-            console.warn('[CustomerCatalyst] Queue is full — dropped ' + over + ' re-queued event(s)');
+            console.warn('[CustomerCatalyst] Queue is full, dropped ' + over + ' re-queued event(s)');
           }
         }
       } finally {
@@ -618,13 +618,13 @@
       if (eventQueue.length > 0) {
         // The real wait for whichever key just failed already lives in
         // notBeforeByKey, set above. This wakeup only has to be soon enough
-        // to notice a key clearing — never long enough to guarantee it — so
+        // to notice a key clearing (never long enough to guarantee it), so
         // it always just uses minInterval: findSendableIndex, at the top of
         // this function, skips a parked key for a sendable one, and the
         // all-parked branch re-sleeps until the earliest real expiry if
         // nothing is sendable yet. Re-deriving a second, approximate delay
         // here from whichever key happens to sit at eventQueue[0] would be
-        // exactly the two-mechanisms bug this file used to have — one
+        // exactly the two-mechanisms bug this file used to have: one
         // persisted wait, read from one place, is the whole fix.
         this._scheduleProcess(minInterval);
       } else {
@@ -650,7 +650,7 @@
 
         // Retry-After is not in this endpoint's Access-Control-Expose-Headers
         // (verified against the live response), so response.headers.get
-        // returns null in a browser — always, not intermittently. Trying it
+        // returns null in a browser: always, not intermittently. Trying it
         // first costs one line, works for any non-browser caller of this same
         // file, and starts working for free if the expose list ever changes.
         // The real signal is retry_after_seconds in the 429 body, which the
@@ -698,7 +698,7 @@
       const mine = eventQueue.some(function(item) { return item.key === self.apiKey; });
       if (!mine && inFlightKey !== self.apiKey) return;
 
-      // A pending linger timer is a deliberate delay, not work in progress —
+      // A pending linger timer is a deliberate delay, not work in progress:
       // flush() exists for exactly the moment (a page navigating away) that
       // cannot afford to wait it out, so cancel it and go straight to sending.
       if (lingerTimer !== null) {
@@ -737,16 +737,16 @@
 
   window.CustomerCatalyst = CustomerCatalyst;
 
-  // One flag, one log helper. LIMITS is deliberately not runtime-mutable —
-  // see the comment at its declaration — but debug is, on purpose: flipping
+  // One flag, one log helper. LIMITS is deliberately not runtime-mutable
+  // (see the comment at its declaration), but debug is, on purpose: flipping
   // it only changes what the SDK prints, never what it does. That is exactly
   // why nothing it prints may be the raw API key. debug is a public mutable
   // static, so any script sharing the customer's page can set
-  // window.CustomerCatalyst.debug = true and read the console — for every
+  // window.CustomerCatalyst.debug = true and read the console, for every
   // organisation whose key ever crosses this file, not just its own.
   CustomerCatalyst.debug = false;
 
-  // Last 4 characters, never the key itself — see the comment above. Enough
+  // Last 4 characters, never the key itself (see the comment above). Enough
   // to tell two keys apart in a multi-instance debug session, nowhere near
   // enough to reconstruct one.
   function redactKey(key) {
@@ -760,30 +760,30 @@
     (console.debug || console.log).apply(console, args);
   }
 
-  // Reads the org key from a <script api-key="..."> tag — api-key, NOT
+  // Reads the org key from a <script api-key="..."> tag: api-key, NOT
   // data-api-key. There is exactly one key, the same value the constructor
   // takes and the RPC sends as p_api_key; no second key concept to invent.
   // currentScript is null once the script has finished executing in some
   // load orders, so querySelector is the fallback. Both are optional DOM
-  // APIs, so every access is typeof-guarded — an environment missing them
+  // APIs, so every access is typeof-guarded: an environment missing them
   // entirely (this file's own test harness, deliberately) must no-op here,
   // not throw: a throw at load time would take the rest of the file down
   // with it.
   //
   // ponytail: the querySelector fallback takes the FIRST script[api-key] tag
   // in the DOM, which need not be this one, if more than one is present AND
-  // currentScript is unavailable — both already rare on their own. The
-  // shipped basename is always customercatalyst.js (see CLAUDE.md — build.sh
+  // currentScript is unavailable (both already rare on their own). The
+  // shipped basename is always customercatalyst.js (see CLAUDE.md: build.sh
   // only ever produces dist/customercatalyst.js and dist/dev/customercatalyst.js;
   // the other filenames in this working tree are gitignored local scratch
-  // copies, not shipped builds), so matching on src would be a real option —
+  // copies, not shipped builds), so matching on src would be a real option;
   // left alone instead because document.currentScript is reliable for the
   // normal case (a synchronous, non-deferred script tag), and this fallback
   // only matters for the rare load order where it's already null.
   CustomerCatalyst.init = function() {
     // instanceof, not truthiness. A script that runs before this one cannot
-    // construct a real CustomerCatalyst — the class does not exist in its
-    // scope yet — so a planted `window.customercatalyst` with lookalike
+    // construct a real CustomerCatalyst (the class does not exist in its
+    // scope yet), so a planted `window.customercatalyst` with lookalike
     // identify()/track() methods fails this check and is replaced, instead
     // of silently absorbing every customercatalyst.track() call for the rest
     // of the page's life. A genuine prior instance (this file loaded twice,
@@ -798,7 +798,7 @@
 
     const apiKey = script.getAttribute('api-key');
     // .trim() catches a whitespace-only attribute, not just an absent or
-    // empty one — either would otherwise construct a live instance whose
+    // empty one: either would otherwise construct a live instance whose
     // every send fails against a key that was never going to work.
     if (!apiKey || !apiKey.trim()) return null;
 
@@ -806,12 +806,12 @@
 
     // Reaching here means something was at this name and it was NOT one of our
     // instances (the instanceof check above already returned for that case), so
-    // it is either a planted lookalike — which must be replaced, that is the
-    // whole point of the check — or a customer whose own page happens to use
+    // it is either a planted lookalike (which must be replaced, that is the
+    // whole point of the check) or a customer whose own page happens to use
     // this identifier. Replacing is right for the first and unavoidable for the
     // second, but the second deserves to be told rather than silently broken:
     // their `customercatalyst` stops being theirs and nothing else would say so.
-    // Unconditional, not debugLog — an integration error nobody has turned
+    // Unconditional, not debugLog: an integration error nobody has turned
     // debugging on to find is exactly the one that needs to speak up.
     if (typeof window.customercatalyst !== 'undefined') {
       console.warn('[CustomerCatalyst] window.customercatalyst was already in use on this ' +
@@ -841,7 +841,7 @@
 
     if (eventQueue.length === 0) return;
 
-    // Form-encoded so no CORS preflight is needed — a page on its way out
+    // Form-encoded so no CORS preflight is needed: a page on its way out
     // cannot reliably complete one.
     let size = LIMITS.maxBatchSize;
     // Events a beacon cannot carry. Kept aside for the fetch path if the page
@@ -856,7 +856,7 @@
       });
 
       // Form-encoding is what actually goes on the wire, and it percent-escapes
-      // every { " : and , to three bytes — JSON roughly doubles. A batch sized
+      // every { " : and , to three bytes; JSON roughly doubles. A batch sized
       // against the 28KB request limit becomes 50–70KB here, over the 64KB budget
       // the browser shares across every beacon on the page. Measuring the encoded
       // body means shrinking to fit directly, instead of learning it from two or
@@ -866,14 +866,14 @@
         if (size > 1) {
           eventQueue = batch.items.concat(eventQueue);
           size = Math.max(1, Math.floor(size / 2));
-          debugLog('beacon batch too large encoded (' + encodedBytes + ' bytes) — halving size to', size);
+          debugLog('beacon batch too large encoded (' + encodedBytes + ' bytes), halving size to', size);
           continue;
         }
         // One event that will not fit even on its own. Metadata of many short
         // key/value pairs encodes near the 3x ceiling, so an event comfortably
         // inside the 28KB request limit can land over this one. Sending it anyway
         // would claim most of the budget every other instance on the page is
-        // trying to flush into at the same moment — and if the browser refused
+        // trying to flush into at the same moment, and if the browser refused
         // it, the loop below abandons everything still queued, including other
         // organisations'.
         //
@@ -882,7 +882,7 @@
         // the fetch path, which only has to respect the 28KB limit it already
         // passes. Held in a local array, not put straight back, or takeBatch
         // would pick it up again on the next turn of this loop and never finish.
-        debugLog('event unbeaconable even alone (' + encodedBytes + ' bytes) — deferred to the fetch path');
+        debugLog('event unbeaconable even alone (' + encodedBytes + ' bytes), deferred to the fetch path');
         deferred.push.apply(deferred, batch.items);
         continue;
       }
@@ -891,7 +891,7 @@
         debugLog('beacon sent:', batch.items.length, 'event(s),', encodedBytes, 'bytes');
         // Grown back after a successful send. Left at whatever size a
         // previous shrink found, `size` would send the rest of a uniformly
-        // large queue one event per beacon for the entire drain — burning
+        // large queue one event per beacon for the entire drain, burning
         // the shared page-wide beacon budget exactly when the page is
         // closing. Doubling rather than jumping straight back to
         // maxBatchSize avoids re-collapsing through the full halving ladder
@@ -905,12 +905,12 @@
       // rather than abandoning everything still queued.
       eventQueue = batch.items.concat(eventQueue);
       if (size === 1) {
-        console.warn('[CustomerCatalyst] Browser refused the final beacon — ' +
+        console.warn('[CustomerCatalyst] Browser refused the final beacon, ' +
           eventQueue.length + ' event(s) could not be sent');
         break;
       }
       size = Math.max(1, Math.floor(size / 2));
-      debugLog('beacon refused — halving size to', size);
+      debugLog('beacon refused, halving size to', size);
     }
 
     // Restored after the loop, including on the break above, and at the front:

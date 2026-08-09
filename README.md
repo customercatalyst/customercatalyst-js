@@ -91,14 +91,14 @@ instance built from the tag's own `api-key`, so a lookalike object can't silentl
 ### API Key
 
 1. Log in to your CustomerCatalyst dashboard
-2. Navigate to **Settings → API Keys**
+2. Navigate to **Company Settings → API Keys**
 3. Copy your organization's API key (starts with `org_`)
 
 ### Customer IDs
 
-1. Go to **Customers** in your dashboard
-2. Each customer displays their unique ID
-3. Export all customer IDs via **Customers → Export**
+1. Go to **Settings → Data Export** in your dashboard
+2. Export the full customer list
+3. The export lists each customer's unique ID; use that value as the `customerId`
 
 ### Event Types
 
@@ -292,7 +292,7 @@ but the key itself is fine, so the SDK keeps sending everything else normally:
 - **422**: unprocessable batch
 
 ```javascript
-[CustomerCatalyst] Server rejected the batch — dropping 3 event(s) and continuing
+[CustomerCatalyst] Server rejected the batch, dropping 3 event(s) and continuing
 ```
 
 This is silent otherwise; check [`customercatalyst.stats`](#stats) (`droppedEvents` / `droppedBatches`)

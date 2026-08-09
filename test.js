@@ -15,7 +15,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const okResp = n => ({ ok: true, text: async () => '', json: async () => ({ success: true, received: n, accepted: n, inserted: n, duplicates: 0, rejected: 0 }) });
 const errResp = s => ({ ok: false, status: s, text: async () => 'error ' + s, json: async () => null });
 
-// Some checks need a shorter backoff or a lower attempt ceiling — proving that
+// Some checks need a shorter backoff or a lower attempt ceiling: proving that
 // retries terminate takes 81 seconds at the shipped values. The shipped file has
 // no override hook on purpose: anything reachable from the page (a mutable
 // LIMITS on the global, or a free identifier that falls through the scope chain
@@ -39,7 +39,7 @@ function withLimits(src, overrides) {
 // only ever call its own.
 // scriptAttrs simulates a <script api-key="..." ...> tag for the Tier 4
 // auto-init checks. Left undefined, `document` gets neither currentScript
-// nor querySelector — the same shape as every check above this needs, and
+// nor querySelector, the same shape as every check above this needs, and
 // the one auto-init has to survive without throwing (see CLAUDE.md: a throw
 // at load time takes the whole file down with it).
 function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
@@ -111,7 +111,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // --- batching by size, not just count ------------------------------------
   // Measured with Buffer.byteLength, NOT String.length: the limit is in bytes and
   // the two agree only for ASCII. The padding is deliberately non-ASCII for the
-  // same reason — an ASCII fixture measured with .length passes whether the
+  // same reason: an ASCII fixture measured with .length passes whether the
   // implementation counts bytes or code units, so it tests nothing.
   const bytes = s => Buffer.byteLength(s, 'utf8');
   {
@@ -131,7 +131,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // --- an over-limit event is measured in bytes, not code units -------------
   // The fixture has to discriminate, which rules out emoji: they are surrogate
   // pairs, so .length already counts them as 2 and an over-byte emoji payload is
-  // over-length too. '中' is ONE code unit and THREE bytes — 12000 of them read
+  // over-length too. '中' is ONE code unit and THREE bytes; 12000 of them read
   // as 12000 against the 28000 limit while weighing 36000 on the wire, so a
   // .length guard accepts it and only a byte guard drops it.
   {
@@ -147,7 +147,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
 
   // --- error classification -------------------------------------------------
   // Only a credential failure stops a key. 400/413/422 mean "this payload is
-  // bad", not "this key is bad" — dropping the batch there is what keeps a
+  // bad", not "this key is bad": dropping the batch there is what keeps a
   // malformed request from taking an organisation's tracking down completely.
   for (const [status, fatal] of [[401, true], [403, true], [404, true],
                                  [400, false], [413, false], [422, false],
@@ -234,7 +234,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // Metadata of many short key/value pairs encodes near the 3x ceiling, so an
   // event that passes the 28KB request cap can exceed the 48KB beacon cap on its
   // own. It cannot be shrunk any further, and sending it would claim most of the
-  // page-wide budget — or be refused, which used to abandon the whole queue.
+  // page-wide budget, or be refused, which used to abandon the whole queue.
   {
     const many = {};
     // The window is narrow: at the ~1.83x encoding ratio these pairs produce,
@@ -262,7 +262,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
       maxBody <= 48000, maxBody + ' bytes');
     check('the events behind it still leave', delivered === 5, delivered + ' delivered');
     // 'hidden' fires on tab switch too, and the page may well survive. The event
-    // is under the 28KB request cap, so the fetch path can still deliver it —
+    // is under the 28KB request cap, so the fetch path can still deliver it:
     // keeping it beats discarding it over a beacon-only ceiling.
     check('the unbeaconable event is kept for the fetch path',
       cc.stats.queued === 1 && cc.stats.droppedEvents === 0, JSON.stringify(cc.stats));
@@ -292,7 +292,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // track() refuses to push past maxQueueLength, but the retry path concatenates
   // straight onto the queue and bypasses that check. Reproducing it needs the
   // queue refilled to the cap WHILE a batch is on the wire, so the failed batch
-  // comes back to an already-full queue — hence the gated fetch.
+  // comes back to an already-full queue, hence the gated fetch.
   {
     let release;
     const gate = new Promise(function(r) { release = r; });
@@ -434,7 +434,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // Every open tab computing the same delay from the same failure count
   // retries in lockstep and re-hammers a server that is trying to recover.
   // maxRequestsPerSecond is raised so minInterval cannot mask the jitter
-  // behind its own pacing floor — the point here is the backoff delay
+  // behind its own pacing floor: the point here is the backoff delay
   // itself, not request pacing (which the "one key's outage" checks above
   // already cover at default rates).
   {
@@ -468,7 +468,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
       return okResp(n);
     });
     const cc = new CC('org_linger'); cc.identify({ customerId: 'c1' });
-    for (let i = 0; i < 10; i++) cc.track('burst', 1, { i });   // synchronous — well inside the 50ms window
+    for (let i = 0; i < 10; i++) cc.track('burst', 1, { i });   // synchronous, well inside the 50ms window
     await sleep(200);
     check('a synchronous burst on an empty queue coalesces into one batch',
       calls === 1 && firstBatchSize === 10, calls + ' call(s), first batch ' + firstBatchSize);
@@ -479,14 +479,14 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     const { CC } = load(async () => { sentAt = Date.now(); return okResp(1); });
     const cc = new CC('org_test'); cc.identify({ customerId: 'c1' });
     cc.track('x', 1);              // schedules the 50ms linger, does not send yet
-    await cc.flush();              // must not wait it out — a closing page cannot afford to
+    await cc.flush();              // must not wait it out: a closing page cannot afford to
     check('flush cancels a pending linger and sends right away',
       sentAt !== null && (sentAt - t0) < 40, sentAt === null ? 'never sent' : (sentAt - t0) + 'ms');
   }
   {
     // sendPending() reads eventQueue directly and does not go through
     // _processQueue at all, so a pending linger must not stop a beacon on
-    // page hide either — no sleep before hide(), same as the existing
+    // page hide either: no sleep before hide(), same as the existing
     // "hiding the page sends..." check above, which already proves this for
     // the non-linger cases; this confirms it holds mid-linger too.
     let beaconed = 0;
@@ -503,7 +503,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // --- Tier 3.3: maxFieldLength counts code points, not UTF-16 units -------
   // Same class of error as THE UNIT RULE: the server counts customer_id/
   // event_type with Postgres length(), i.e. characters (code points), while
-  // .length counts UTF-16 code units — equal only for the BMP. An emoji is
+  // .length counts UTF-16 code units, equal only for the BMP. An emoji is
   // one code point but two units, so a 200-emoji string reads as 400 against
   // a naive .length guard and gets rejected client-side even though the
   // server would accept it.
@@ -512,7 +512,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     const cc = new CC('org_cp');
     const under = '\u{1F600}'.repeat(200);                  // 200 code points, 400 UTF-16 units
     // 260 code points, 460 units: under 2x the limit (510), so only an
-    // actual code-point count — not the cheap .length pre-filter — catches
+    // actual code-point count (not the cheap .length pre-filter) catches
     // this one. Proves Array.from is actually exercised, not just the guard.
     const over = 'a'.repeat(60) + '\u{1F600}'.repeat(200);
     check('an astral-plane string under the code-point limit is accepted despite .length > 255',
@@ -527,7 +527,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
 
   // --- Tier 3.4: sendPending grows `size` back after a successful beacon ---
   // Without growth, one oversized batch driving `size` to 1 sends every
-  // later batch in the same drain one event per beacon — burning the
+  // later batch in the same drain one event per beacon, burning the
   // shared page-wide beacon budget exactly when the page is closing. The
   // first event here is unbeaconable alone (same fixture as the existing
   // "one event too big to beacon" check) and gets deferred, leaving `size`
@@ -582,7 +582,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // --- Tier 3.6: a 429's Retry-After is honoured from the body -------------
   // The header is not exposed cross-origin on this endpoint (see the
   // comment at parseRetryAfter in the source), so errResp's headerless
-  // response is exactly the shape a real browser sees here — this exercises
+  // response is exactly the shape a real browser sees here; this exercises
   // the body path, not a gap in the mock.
   {
     let calls = 0;
@@ -604,7 +604,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   }
   // --- an oversized Retry-After is clamped, not honoured verbatim ----------
   // Co-tenants are protected from a long wait by the skip-ahead scan now
-  // (see the Tier 3.7 checks below), not by this clamp — clamping still
+  // (see the Tier 3.7 checks below), not by this clamp; clamping still
   // matters on its own, though: retry_after_seconds is a number the server
   // (or a spoofed response) chose, not something the SDK controls, so an
   // un-clamped value could park a key for hours on nothing more than that.
@@ -628,21 +628,21 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
       calls < 2 ? 'n/a' : (times[1] - times[0]) + 'ms');
   }
 
-  // --- Tier 3.7: head-of-line blocking — skip a parked key, don't wait on it -
+  // --- Tier 3.7: head-of-line blocking: skip a parked key, don't wait on it -
   // _processQueue used to derive its wait from whichever key sat at
   // eventQueue[0] and sleep the whole loop for it, so a key parked behind a
   // Retry-After blocked every other organisation's healthy traffic queued
-  // behind it — a reviewer measured a second org's event held ~1.95s behind
+  // behind it: a reviewer measured a second org's event held ~1.95s behind
   // a rate-limited org. findSendableIndex fixes this by scanning past a
   // parked key for one that can send right now.
   {
     // The exact race that reproduces the bug: org_other's events are queued
-    // AFTER org_parked has already failed and parked itself at the head —
+    // AFTER org_parked has already failed and parked itself at the head,
     // tracked mid-test, not up front, so they land behind it in array order,
     // same as the reviewer's repro.
     let otherDelivered = 0, otherFirstAt = null;
     const t0 = Date.now();
-    // org_parked never succeeds — maxAttempts:2 keeps it from retrying (and
+    // org_parked never succeeds: maxAttempts:2 keeps it from retrying (and
     // holding a live timer) for the default 10 attempts' worth of 2s waits
     // long after this block's own assertions are done, the same reason
     // every other "never succeeds" block in this file bounds it.
@@ -689,14 +689,14 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     await sleep(150);
     other.track('fine', 1);
     await sleep(1300);                         // past the 1s retry-after, plus margin
-    check('the parked key still sends once its own wait expires — skipping does not starve it',
+    check('the parked key still sends once its own wait expires, skipping does not starve it',
       parkedCalls >= 2 && parkedDelivered === 1, parkedCalls + ' call(s), delivered=' + parkedDelivered);
   }
   {
     // Two keys parked at once with different expiries, longer-wait key at
     // the head: sleeping on the head's wait (3s) instead of the earliest
     // (1.2s) would keep org_B waiting for org_A's clock, not its own.
-    // org_A never succeeds — maxAttempts:2 bounds it for the same reason as
+    // org_A never succeeds: maxAttempts:2 bounds it for the same reason as
     // the block above, instead of it retrying every 3s for the rest of the run.
     let aCalls = 0, bCalls = 0, bDelivered = 0;
     const { CC } = load(async (u, o) => {
@@ -725,7 +725,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
       'A calls=' + aCalls + ', B calls=' + bCalls + ', B delivered=' + bDelivered);
   }
   {
-    // The overwhelmingly common case — nothing parked, one key only — must
+    // The overwhelmingly common case (nothing parked, one key only) must
     // still take index 0 directly and send everything in one batch, exactly
     // as before the skip-ahead scan existed.
     let calls = 0, delivered = 0;
@@ -738,7 +738,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     const cc = new CC('org_single'); cc.identify({ customerId: 'c1' });
     for (let i = 0; i < 5; i++) cc.track('x', 1, { i });
     await sleep(300);
-    check('a single-key queue with nothing parked is unaffected — one batch from index 0',
+    check('a single-key queue with nothing parked is unaffected, one batch from index 0',
       calls === 1 && delivered === 5, calls + ' call(s), ' + delivered + '/5');
   }
 
@@ -746,17 +746,17 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // The head-of-line fix (Tier 3.7) makes track() cancel and re-run
   // _processQueue() whenever a fresh event's key was not the one the current
   // wait was for (see the comment at processTimer's declaration). That is
-  // safe for a Retry-After wait because it is persisted in notBeforeByKey —
+  // safe for a Retry-After wait because it is persisted in notBeforeByKey;
   // it used to NOT be safe for the exponential-backoff wait, which existed
   // only as the argument of the setTimeout the fix had just cancelled, so
   // re-deriving it found no notBeforeByKey entry and treated the key as
   // immediately sendable. None of the earlier backoff/jitter checks in this
   // file catch that: they all call track() exactly once and never again
-  // during the wait. These three do call track() repeatedly mid-wait —
+  // during the wait. These three do call track() repeatedly mid-wait:
   // exactly the arrival pattern that used to collapse the backoff.
   {
     // Single org, failing on every attempt, with a second track() call
-    // landing every 20ms throughout — the reviewer's first repro. Without
+    // landing every 20ms throughout, the reviewer's first repro. Without
     // the fix this stays flat at ~minInterval forever; fixed, it must
     // escalate roughly the same as the Tier 3.1 jitter check above, just
     // observed across several different failure counts instead of one.
@@ -779,8 +779,8 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     // Cross-tenant version of the same repro: org A is the one failing and
     // backing off; org B is healthy and merely calls track() every 20ms, the
     // way ordinary page traffic would. B's traffic must not collapse A's
-    // backoff, and — the flip side, proving the fix didn't just re-introduce
-    // head-of-line blocking to get there — B's own events must still go out
+    // backoff, and (the flip side, proving the fix didn't just re-introduce
+    // head-of-line blocking to get there) B's own events must still go out
     // promptly.
     const timesA = [];
     let bDelivered = 0, bFirstAt = null;
@@ -811,7 +811,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   }
   {
     // Same idea on the Retry-After path specifically, which was already
-    // correct before this fix — this proves the unification into one map
+    // correct before this fix: this proves the unification into one map
     // didn't regress it. Org B pokes every 20ms while org A sits parked on
     // a 2s retry-after; B must still be served promptly (head-of-line).
     let bDelivered = 0, bFirstAt = null;
@@ -845,12 +845,12 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     check('the auto-inited instance carries the tag\'s api key', autoInited && autoInited.apiKey === 'org_auto');
   }
   {
-    // Exactly one key concept — api-key, not data-api-key.
+    // Exactly one key concept: api-key, not data-api-key.
     const { autoInited } = load(undefined, undefined, undefined, { 'data-api-key': 'org_wrong' });
-    check('a data-api-key attribute does not auto-init — there is exactly one key concept', !autoInited);
+    check('a data-api-key attribute does not auto-init: there is exactly one key concept', !autoInited);
   }
   {
-    // An empty attribute already worked (falsy); whitespace is the gap — it
+    // An empty attribute already worked (falsy); whitespace is the gap: it
     // is truthy, so without .trim() this used to construct a live instance
     // whose every send would fail against a key that was never real.
     const { autoInited } = load(undefined, undefined, undefined, { 'api-key': '' });
@@ -862,7 +862,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   }
   {
     // No script tag at all: the harness's default fake document (only
-    // addEventListener — no currentScript, no querySelector) is exactly the
+    // addEventListener, no currentScript, no querySelector) is exactly the
     // environment auto-init must survive without throwing. Every check above
     // this one in the file already ran against that same default document,
     // so a throw here would have taken all 60+ of them down with it.
@@ -876,13 +876,13 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
       autoInited && autoInited.constructor.debug === true);
   }
   {
-    // A planted window.customercatalyst that is NOT a real instance — the
+    // A planted window.customercatalyst that is NOT a real instance, the
     // hijack this guards against: a script running before this one cannot
     // construct a real CustomerCatalyst (the class does not exist in its
     // scope yet), but it can plant a lookalike object with its own
     // identify()/track(). The old truthiness check trusted it; init() must
     // replace it instead. Simulated directly (not via load()) since load()
-    // always starts from a bare window — this needs window.customercatalyst
+    // always starts from a bare window: this needs window.customercatalyst
     // set BEFORE the module evaluates.
     const listeners = {};
     const on = (n, fn) => { (listeners[n] = listeners[n] || []).push(fn); };
@@ -900,7 +900,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   {
     // Replacing is correct, but a customer whose own page uses this identifier
     // must not find out by debugging why their code broke. The warning is
-    // unconditional on purpose — nobody turns debug on to find a bug they do
+    // unconditional on purpose: nobody turns debug on to find a bug they do
     // not yet know they have.
     const warns = [];
     const saved = console.warn;
@@ -922,7 +922,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     check('the collision warning never leaks the api key',
       !warns.some(m => m.indexOf('org_collide') !== -1));
 
-    // The ordinary case must stay silent — a warning on every clean page load
+    // The ordinary case must stay silent: a warning on every clean page load
     // would train customers to ignore it, which costs more than it buys.
     warns.length = 0;
     const w2 = { addEventListener: on, crypto: require('crypto').webcrypto };
@@ -933,8 +933,8 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     console.warn = saved;
   }
   {
-    // A genuine prior instance — this same file loaded twice, or a caller
-    // who already built one by hand — is exactly the case init() must still
+    // A genuine prior instance (this same file loaded twice, or a caller
+    // who already built one by hand) is exactly the case init() must still
     // treat as idempotent.
     const listeners = {};
     const on = (n, fn) => { (listeners[n] = listeners[n] || []).push(fn); };
@@ -966,7 +966,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
 
   // --- Tier 4: debug output never contains the full API key -----------------
   // CustomerCatalyst.debug is a public mutable static (see the comment at its
-  // declaration in the source) — any script sharing the customer's page can
+  // declaration in the source), any script sharing the customer's page can
   // flip it and read the console, so the raw key must never be one of the
   // arguments debugLog is called with, on any path that logs one.
   {
@@ -988,7 +988,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     const realDebug = console.debug, realLog = console.log;
     console.debug = console.log = (...args) => calls.push(args.join(' '));
     const fullKey = 'org_redact_retryafter_key';
-    // maxAttempts:2 — this mock never succeeds, so without a low ceiling the
+    // maxAttempts:2, this mock never succeeds, so without a low ceiling the
     // module keeps retrying (and logging) for the default 10 attempts at
     // ~1s apiece, long after this block restores the real console and moves
     // on: the leftover timers would then print straight to the terminal
@@ -1011,11 +1011,11 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
     const realDebug = console.debug, realLog = console.log;
     console.debug = console.log = (...args) => calls.push(args.join(' '));
     const fullKey = 'org_redact_backoff_key';
-    // maxAttempts:5, not 50 — same reason as the retry-after block above: it
+    // maxAttempts:5, not 50, same reason as the retry-after block above: it
     // must fully settle inside this block's sleep, or its remaining retries
     // keep firing (and logging to the real console) after restore.
     // maxRequestsPerSecond:1000 for the same reason it's raised in the
-    // "Tier 3.1" jitter check below — minInterval (100ms at the default 10/s)
+    // "Tier 3.1" jitter check below: minInterval (100ms at the default 10/s)
     // would otherwise dominate the much smaller 50ms backoff cap and roughly
     // double each cycle, pushing the 5th attempt past this block's sleep.
     const { CC } = load(async () => errResp(500), undefined,
@@ -1042,7 +1042,7 @@ function load(fetchImpl, beaconImpl, limits, scriptAttrs) {
   // --- restart() resumes with no leftover retry-after after a fatal stop ---
   // stopKey() clears notBeforeByKey when it stops a key; this proves
   // restart() actually gets the benefit of that. The key earns a real
-  // retry-after wait on its first attempt, then goes fatal on the retry —
+  // retry-after wait on its first attempt, then goes fatal on the retry:
   // exactly the sequence that would leave a stale future wait behind if
   // stopKey (or restart()) ever stopped clearing it.
   {

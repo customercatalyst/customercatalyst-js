@@ -4,11 +4,18 @@ Track customer usage events and monitor product adoption with CustomerCatalyst's
 
 ## Installation
 
-Add the following script tag to your HTML, preferably in the `<head>` section:
+The simplest install is one script tag with your API key on it, in the `<head>`:
 
 ```html
-<script src="https://cdn.customercatalyst.io/customercatalyst.js"></script>
+<script src="https://cdn.customercatalyst.io/customercatalyst.js" api-key="YOUR_API_KEY"></script>
 ```
+
+That's `api-key`, not `data-api-key`. It creates a ready-to-use instance at `window.customercatalyst`
+automatically — no `new CustomerCatalyst(...)` call needed.
+
+If you need more than one instance on a page, the key is only known at runtime, or you're bundling
+this into a module-based build, omit the attribute and construct it yourself — see
+[Manual initialization](#manual-initialization).
 
 ## Quick Start
 
@@ -16,27 +23,68 @@ Add the following script tag to your HTML, preferably in the `<head>` section:
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://cdn.customercatalyst.io/customercatalyst.js"></script>
+  <script src="https://cdn.customercatalyst.io/customercatalyst.js" api-key="YOUR_API_KEY"></script>
 </head>
 <body>
   <script>
-    // Initialize with your API key
-    var cc = new CustomerCatalyst('YOUR_API_KEY');
-    
-    // Identify the customer
-    cc.identify({
+    // window.customercatalyst is ready as soon as this script has run
+    customercatalyst.identify({
       customerId: 'CUSTOMER_ID',
       customerName: 'Acme Corporation' // optional
     });
-    
-    // Track events
-    cc.track('login');
-    cc.track('invoice_created', 1500);
-    cc.track('report_generated', 1, { type: 'monthly' });
+
+    customercatalyst.track('login');
+    customercatalyst.track('invoice_created', 1500);
+    customercatalyst.track('report_generated', 1, { type: 'monthly' });
   </script>
 </body>
 </html>
 ```
+
+Typing `customercatalyst` on every call is a mouthful — capture it in a short local variable if you'd
+rather not:
+
+```javascript
+var cc = customercatalyst;
+cc.identify({ customerId: 'CUSTOMER_ID' });
+cc.track('login');
+```
+
+This is safe even on a page that shares `window` with other scripts: `var cc = customercatalyst` reads
+`window.customercatalyst` once and holds onto that instance from then on, so it doesn't matter if some
+other, unrelated script later does `window.cc = somethingElse` — your `cc` already has its own reference
+and is unaffected.
+
+### Manual initialization
+
+Skip the `api-key` attribute and construct the instance yourself with `new CustomerCatalyst(apiKey)`.
+Use this instead of the default script-tag path when:
+- you need more than one instance on a page (each API key gets its own instance)
+- the key is only known at runtime (fetched from your own backend, a feature flag, etc.), not at
+  page-load time
+- you're bundling this file into a module-based build rather than loading it as a plain `<script>`
+
+```html
+<script src="https://cdn.customercatalyst.io/customercatalyst.js"></script>
+<script>
+  var cc = new CustomerCatalyst('YOUR_API_KEY');
+  cc.identify({ customerId: 'CUSTOMER_ID' });
+  cc.track('login');
+</script>
+```
+
+Name the variable whatever you like, but not `CustomerCatalyst` or `customercatalyst` — either one
+shadows something this file relies on (the class itself, or the auto-init instance), and the failure
+it causes ranges from a confusing `TypeError` on the next `new CustomerCatalyst(...)` to silently
+overwriting the script tag's own instance. Any other name, including the `cc` used here, is safe.
+
+Both paths behave identically once you have an instance — `identify()` is still required before
+`track()` either way. Auto-init is idempotent, not overwrite-proof: if `window.customercatalyst` is
+already a real `CustomerCatalyst` instance (this script loaded twice, or you constructed one yourself
+before the tag ran), it's reused untouched. Anything else found at `window.customercatalyst` —
+including something a different script planted there before this one ran — is replaced with a real
+instance built from the tag's own `api-key`, so a lookalike object can't silently absorb your
+`.track()` calls.
 
 ## Getting Your Credentials
 
@@ -59,25 +107,18 @@ Add the following script tag to your HTML, preferably in the `<head>` section:
 
 ## API Reference
 
-### `new CustomerCatalyst(apiKey)`
-
-Initialize the SDK with your organization's API key.
-
-```javascript
-var cc = new CustomerCatalyst('org_abc123xyz');
-```
-
-**Parameters:**
-- `apiKey` (string, required) - Your organization's API key from the dashboard
-
----
+Everything below assumes you already have an instance — either `window.customercatalyst`, the one the
+script tag creates automatically (see [Installation](#installation)), or one you built yourself with
+`new CustomerCatalyst(apiKey)` and assigned to a variable of your own choosing (see
+[Manual initialization](#manual-initialization)). The examples below use `customercatalyst`; if you went
+the manual route, substitute whatever you named your instance.
 
 ### `identify(customerData)`
 
 Identify the current customer. Must be called before tracking events.
 
 ```javascript
-cc.identify({
+customercatalyst.identify({
   customerId: 'customer_12345',      // required
   customerName: 'Acme Corporation'   // optional
 });
@@ -96,13 +137,13 @@ Track a usage event.
 
 ```javascript
 // Simple event
-cc.track('login');
+customercatalyst.track('login');
 
 // Event with value
-cc.track('purchase', 1500);
+customercatalyst.track('purchase', 1500);
 
 // Event with metadata
-cc.track('export_report', 1, { format: 'pdf', pages: 24 });
+customercatalyst.track('export_report', 1, { format: 'pdf', pages: 24 });
 ```
 
 **Parameters:**
@@ -119,7 +160,7 @@ send on their own, and anything still queued is sent automatically when the page
 is hidden or closed).
 
 ```javascript
-await cc.flush();
+await customercatalyst.flush();
 ```
 
 Returns a promise. It resolves once the queue has drained, or after 5 seconds if
@@ -135,32 +176,78 @@ temporary — for a wrong API key, create a new instance with the correct key
 instead, since the key is fixed when the instance is created.
 
 ```javascript
-cc.restart();
+customercatalyst.restart();
+```
+
+---
+
+### `stats`
+
+Read-only snapshot of this key's queue. Dropping a batch or a backlog keeps the SDK alive, which is
+right, but it's still a real loss — this is how you find out one happened.
+
+```javascript
+customercatalyst.stats; // { queued: 3, droppedEvents: 0, droppedBatches: 0 }
+```
+
+- `queued` — events for this API key currently waiting to send
+- `droppedEvents` / `droppedBatches` — events and batches lost for this key: a malformed or oversized
+  batch the server rejected outright (see [Dropped Batches](#dropped-batches-bad-request-not-fatal)),
+  a batch that kept failing until it hit the retry ceiling, or a backlog discarded when a
+  [fatal error](#fatal-errors-sdk-stops) stopped the key.
+
+---
+
+### `isStopped`
+
+`true` once a [fatal error](#fatal-errors-sdk-stops) has stopped this API key. `track()` calls are
+silently ignored while this is `true`.
+
+```javascript
+if (customercatalyst.isStopped) { /* show a warning, alert monitoring, etc. */ }
+```
+
+---
+
+### `CustomerCatalyst.init()`
+
+What the script tag calls automatically to build `window.customercatalyst` from its `api-key`
+attribute — documented here because it's what runs behind [Installation](#installation), not because
+you need to call it yourself. Idempotent: calling it again returns the same instance rather than
+building a second one, as long as `window.customercatalyst` genuinely is a `CustomerCatalyst` instance
+already.
+
+```javascript
+CustomerCatalyst.init(); // returns window.customercatalyst, creating it first if needed
 ```
 
 ## Examples
 
 ### Single Page Application
 
+```html
+<script src="https://cdn.customercatalyst.io/customercatalyst.js" api-key="YOUR_API_KEY"></script>
+```
+
 ```javascript
-var cc = new CustomerCatalyst('YOUR_API_KEY');
-cc.identify({ customerId: 'CUSTOMER_ID' });
+customercatalyst.identify({ customerId: 'CUSTOMER_ID' });
 
 // Track throughout the application
-cc.track('dashboard_viewed');
-cc.track('invoice_created', 1500);
-cc.track('settings_updated');
+customercatalyst.track('dashboard_viewed');
+customercatalyst.track('invoice_created', 1500);
+customercatalyst.track('settings_updated');
 ```
 
 ### Multi-Page Website
 
+This is where the script tag pays off most: one `<script>` on every page, no per-page wiring.
+
 ```html
 <!-- Include on every page -->
-<script src="https://cdn.customercatalyst.io/customercatalyst.js"></script>
+<script src="https://cdn.customercatalyst.io/customercatalyst.js" api-key="YOUR_API_KEY"></script>
 <script>
-  var cc = new CustomerCatalyst('YOUR_API_KEY');
-  cc.identify({ customerId: 'CUSTOMER_ID' });
-  cc.track('page_viewed');
+  customercatalyst.identify({ customerId: 'CUSTOMER_ID' });
+  customercatalyst.track('page_viewed');
 </script>
 ```
 
@@ -169,8 +256,8 @@ cc.track('settings_updated');
 ```javascript
 logoutButton.addEventListener('click', function(e) {
   e.preventDefault();
-  cc.track('logout');
-  cc.flush().then(() => {
+  customercatalyst.track('logout');
+  customercatalyst.flush().then(() => {
     window.location.href = '/logout';
   });
 });
@@ -182,19 +269,34 @@ The SDK automatically handles errors to prevent infinite retry loops.
 
 ### Fatal Errors (SDK Stops)
 
-When these errors occur, the SDK stops sending for that API key:
-- Invalid API key
-- Authentication errors
-- Anything else the server rejects as a bad request
+Only a credential failure stops the key — the SDK assumes it will never work again, so it discards
+everything still queued for it rather than retrying forever:
+- **401 / 403** — invalid or revoked API key
+- **404** — wrong endpoint (an unusually old or mis-hosted copy of this file)
 
 ```javascript
 // SDK detects fatal error and stops
-[CustomerCatalyst] Failed to send events: API Error 400: Invalid API key
+[CustomerCatalyst] Failed to send events: API Error 401: {"success":false,"error":"invalid_api_key"}
 [CustomerCatalyst] Fatal error detected. Stopping SDK for this API key.
 
 // Future track() calls are ignored
-cc.track('event'); // Won't send
+customercatalyst.track('event'); // Won't send
 ```
+
+### Dropped Batches (Bad Request, Not Fatal)
+
+A malformed or oversized batch is dropped, not retried — the same bytes would just be rejected again —
+but the key itself is fine, so the SDK keeps sending everything else normally:
+- **400** — malformed request
+- **413** — batch too large
+- **422** — unprocessable batch
+
+```javascript
+[CustomerCatalyst] Server rejected the batch — dropping 3 event(s) and continuing
+```
+
+This is silent otherwise — check [`customercatalyst.stats`](#stats) (`droppedEvents` / `droppedBatches`)
+to see it.
 
 ### Retryable Errors (SDK Auto-Retries)
 
@@ -210,14 +312,57 @@ failure so a struggling server is not overwhelmed:
 // Automatically retries ✅
 ```
 
+The escalating wait is tracked per organization key, not globally, and it holds regardless of what
+else happens on the page while it is pending — including that same key's own further `track()` calls,
+or another key's healthy traffic sharing the queue. It is not just a delay before the next retry
+attempt; it is remembered, so nothing arriving mid-wait can shorten it.
+
+For a rate-limited (429) response specifically, the SDK waits as long as the server asks instead of
+its own backoff schedule, bounded to at most 5 minutes so a garbage or hostile wait value can't park a
+key for hours. If more than one organization's key is sending from the same page, a quota wait on one
+key does not hold up another's healthy events queued behind it — the SDK sends whichever key is
+currently allowed to send, skipping past a waiting one rather than blocking the whole page on its
+clock. That wait comes from the response body, not the `Retry-After` header — browsers don't expose
+that header across origins on this endpoint, so the server also returns the same value as
+`retry_after_seconds` in the 429 body.
+
 ### Restarting After Configuration Fix
 
+`restart()` resumes the *same* key — use it when the cause was temporary (a key that was briefly
+suspended and is valid again, for example), not to swap in a different key:
+
 ```javascript
-// Reinitialize with correct API key
-var cc = new CustomerCatalyst('CORRECT_API_KEY');
-cc.identify({ customerId: 'CUSTOMER_ID' });
+// The key is valid again — resume the same instance, no reload needed:
+customercatalyst.restart();
 // Events now send successfully ✅
 ```
+
+If the key itself was wrong, `restart()` won't help (see [`restart()`](#restart)) — fix the `api-key`
+attribute and reload, or construct a new instance with the correct key.
+
+## Debug Logging
+
+Turn on verbose console logging while integrating, or when diagnosing why events aren't showing up.
+
+Via the script tag:
+
+```html
+<script src="https://cdn.customercatalyst.io/customercatalyst.js" api-key="YOUR_API_KEY" debug></script>
+```
+
+Or at runtime, from either initialization path:
+
+```javascript
+CustomerCatalyst.debug = true;
+```
+
+With it on, the console shows events being queued, batches being sent (event count and byte size),
+the server's response counters, why a given retry delay was chosen, and beacon sizes and refusals on
+page unload. It's silent by default — nothing is logged unless you turn this on. API keys are shown
+redacted (last 4 characters only) in this output, never in full.
+
+`CustomerCatalyst.debug` is a single global switch, not a per-instance setting — turning it on affects
+every `CustomerCatalyst` instance on the page, however each one was created.
 
 ## Best Practices
 
@@ -246,10 +391,13 @@ cc.identify({ customerId: 'CUSTOMER_ID' });
 **Common Errors:**
 
 - **"Must call identify() before tracking events"**  
-  Call `cc.identify()` before any `cc.track()` calls
+  Call `.identify()` before any `.track()` calls on your instance
 
-- **"API Error 400: Invalid API key"**  
-  Verify your API key starts with `org_` and is active
+- **"API Error 401"** (`{"success":false,"error":"invalid_api_key"}`)  
+  Your API key is wrong, inactive, or was revoked — this is a
+  [fatal error](#fatal-errors-sdk-stops), so the SDK stops the key and drops anything still queued for
+  it. Verify your API key starts with `org_` and is active, then create a new instance with the
+  corrected key (see [`restart()`](#restart) for why restarting the same instance won't help here).
 
 - **"eventType is required and must be a non-empty string"**  
   Pass a valid event name as the first parameter
@@ -279,7 +427,11 @@ documented so you know what happens at the edges.
 | `eventType` length | 255 characters | `track()` throws. |
 | `value` | 0 or greater, up to 12 digits and 6 decimals | Stored as `1`, with a console warning. |
 | Single event size | About 28 KB, including `metadata` | The event is dropped with a warning. Batches are split to stay under this. |
-| Queued events | 1,000 | Further events are dropped with a warning until the queue drains. |
+| Queued events | 1,000 total on the page | Further events are dropped with a warning until the queue drains. |
+| Queued events per organization | 500 | Further events for that organization are dropped with a warning until its own backlog drains — other organizations sharing the page are unaffected. |
+
+`customerId` and `eventType` length is counted in characters (Unicode code points), not JavaScript
+string length — an emoji counts as one character here even though it's two UTF-16 units internally.
 
 ### How events are counted
 
@@ -287,7 +439,7 @@ One `track()` call is one event, whatever `value` you pass. `value` is the quant
 that event, not a multiplier on it:
 
 ```javascript
-cc.track('invoice_created', 50);   // 1 event, contributes 50
+customercatalyst.track('invoice_created', 50);   // 1 event, contributes 50
 ```
 
 Batching does not change this. The SDK groups events into fewer network requests for efficiency, but
@@ -298,15 +450,18 @@ piece by piece — and far cheaper:
 
 ```javascript
 // Same result. The first is one event, the second is fifty.
-cc.track('invoices_created', 50);
-for (var i = 0; i < 50; i++) cc.track('invoices_created');
+customercatalyst.track('invoices_created', 50);
+for (var i = 0; i < 50; i++) customercatalyst.track('invoices_created');
 ```
 
 Prefer the first whenever you already know the quantity. It uses a fraction of your hourly allowance
 and far less of your users' bandwidth.
 
 Sending is capped at 10 requests per second, and events are batched, so a burst of activity is sent
-in a few requests rather than hundreds.
+in a few requests rather than hundreds. The first `track()` call after the queue has been idle waits
+briefly (50ms) before sending, so a burst of calls fired in the same tick lands in one request
+instead of several. `flush()` skips that wait — it's meant for the moment a page is navigating away,
+which can't afford it.
 
 If the server rejects individual events as invalid, the SDK reports it:
 
@@ -332,14 +487,6 @@ Works in all modern browsers:
 - **API Keys:** Safe for client-side use (write-only access)
 - **HTTPS Required:** Always use HTTPS to protect data in transit
 - **No PII:** Do not track personal information in metadata
-
-## Support
-
-Need help? Contact our support team:
-
-- **Email:** support@customercatalyst.com
-- **Dashboard:** Click "Help" in your CustomerCatalyst dashboard
-- **Documentation:** [docs.customercatalyst.com](https://docs.customercatalyst.com)
 
 ## License
 

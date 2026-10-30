@@ -24,6 +24,27 @@ function h(tag, attrs, kids) {
   (kids || []).forEach(function (c) { if (c != null) el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
   return el;
 }
+// The widget's own <script> tag. document.currentScript is it for a normal tag, async/defer and
+// createElement. jQuery-inserted HTML (Bubble/Webflow HTML elements, $.html) runs the file by eval
+// (currentScript null) or through its own copy of the tag without our attributes; then the tag the
+// site pasted is still in the page, so take the first one for this file that no widget took yet.
+// ponytail: a script tag set as raw HTML text (not via jQuery) never runs at all; nothing to fix here.
+function ownScript(file) {
+  var mine = function (s) {
+    if (!s || !s.src || s.getAttribute('data-cc-taken') !== null) return false;
+    try { if (new URL(s.src, location.href).pathname !== '/v1/' + file) return false; } catch (e) { return false; }
+    return s.getAttribute('data-key') !== null || s.getAttribute('data-slug') !== null || s.getAttribute('data-preview') !== null;
+  };
+  var s = document.currentScript;
+  if (!mine(s)) {
+    s = null;
+    var all = document.getElementsByTagName ? document.getElementsByTagName('script') : [];
+    for (var i = 0; i < all.length && !s; i++) if (mine(all[i])) s = all[i];
+  }
+  if (s) s.setAttribute('data-cc-taken', '');
+  return s || document.currentScript;
+}
+
 function str(v) { return typeof v === 'string' ? v.trim() : ''; }
 function safeUrl(u) {
   u = str(u);

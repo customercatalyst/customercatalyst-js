@@ -11,7 +11,7 @@
  */
 (function () {
   'use strict';
-  var script = document.currentScript;
+  var script = ownScript('form.js');
   if (!script || !script.src) return;
   var HOST = new URL(script.src).origin;
   if (!window.CustomerCatalystForm) window.CustomerCatalystForm = { version: '1' };

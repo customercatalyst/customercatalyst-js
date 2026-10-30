@@ -41,7 +41,9 @@ const cls = c => n => (n.getAttribute('class') || '').split(' ').includes(c);
 const byText = (t, s) => n => n.tagName === t && n.textContent.includes(s);
 const visible = n => { for (; n; n = n.parent) if (n.hidden) return false; return true; };
 
-function load({ attrs = {}, config, submit = {}, settings, stored, parentOrigin, routes = {} } = {}) {
+function fakeScript(src, attrs) { return { src, getAttribute: n => (n in attrs ? attrs[n] : null), setAttribute: (n, v) => { attrs[n] = String(v); } }; }
+
+function load({ attrs = {}, config, submit = {}, settings, stored, parentOrigin, routes = {}, current, scripts } = {}) {
   const body = new Node('body');
   const own = body.appendChild(new Node('button'));
   own.setAttribute('data-ccm-open', 'new');
@@ -51,7 +53,8 @@ function load({ attrs = {}, config, submit = {}, settings, stored, parentOrigin,
   const docListeners = {};
   const document = {
     readyState: 'complete', body, get activeElement() { return focused; }, visibilityState: 'visible',
-    currentScript: { src: HOST + '/v1/messenger.js', getAttribute: n => (n in attrs ? attrs[n] : null) },
+    currentScript: current !== undefined ? current : fakeScript(HOST + '/v1/messenger.js', attrs),
+    getElementsByTagName: t => (t === 'script' ? scripts || [] : []),
     createElement: t => { const n = new Node(t); if (t === 'iframe') n.contentWindow = { posted: [], postMessage(m, o) { this.posted.push([m, o]); } }; return n; },
     createElementNS: (ns, t) => Object.assign(new Node(t), { ns }),
     createTextNode: s => Object.assign(new Node('#text'), { text: s }),
@@ -663,6 +666,19 @@ const pathsOf = svg => svg.children.map(p => p.getAttribute('d')).join('|');
     const t = load({ attrs: { 'data-preview': '1', 'data-parents': 'https://app.bubble.example' }, config: ok(CFG), stored: { ccm_conversations: STORED } });
     await flush();
     check('preview: no conversations card, no calls, no timers', !t.panel().textContent.includes('Your conversations') && t.calls.length === 0 && t.pending().length === 0);
+  }
+
+  // ── loaded by jQuery (Bubble/Webflow HTML element) ────────────────────────────────────────────
+  {
+    const t = load({ config: ok(CFG), current: null, scripts: [fakeScript(HOST + '/v1/messenger.js', { 'data-key': KEY })] });
+    await flush();
+    check('jQuery eval (no currentScript): finds the pasted tag, launcher shows', t.calls[0] && t.calls[0].url.includes('/v1/messenger/config?key=' + KEY) && !!t.launcher());
+    const t2 = load({ config: ok(CFG), current: fakeScript(HOST + '/v1/messenger.js', {}), scripts: [fakeScript(HOST + '/v1/messenger.js', { 'data-key': KEY })] });
+    await flush();
+    check('jQuery copy without attributes: falls back to the pasted tag', !!t2.launcher());
+    const t3 = load({ config: ok(CFG), current: null, scripts: [fakeScript('https://other.example/v1/form.js', { 'data-key': KEY })] });
+    await flush();
+    check('another file\'s tag is never taken', t3.calls.length === 0);
   }
 
   check('messenger.js never uses innerHTML', !/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(SRC));

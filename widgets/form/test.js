@@ -39,13 +39,16 @@ const find = (root, pred) => all(root).filter(pred);
 const tag = t => n => n.tagName === t;
 const byText = (t, s) => n => n.tagName === t && n.textContent.includes(s);
 
-function load({ attrs, config, submit, location }) {
+function fakeScript(src, attrs) { return { src, getAttribute: n => (n in attrs ? attrs[n] : null), setAttribute: (n, v) => { attrs[n] = String(v); } }; }
+
+function load({ attrs, config, submit, location, current, scripts }) {
   const body = new Node('body');
   const target = body.appendChild(new Node('div'));
   const button = body.appendChild(new Node('button'));
   const document = {
     readyState: 'complete', body, title: '',
-    currentScript: { src: HOST + '/v1/form.js', getAttribute: n => (n in attrs ? attrs[n] : null) },
+    currentScript: current !== undefined ? current : fakeScript(HOST + '/v1/form.js', attrs),
+    getElementsByTagName: t => (t === 'script' ? scripts || [] : []),
     createElement: t => { const n = new Node(t); if (t === 'iframe') n.contentWindow = { posted: [], postMessage(m, o) { this.posted.push([m, o]); } }; return n; },
     createTextNode: s => Object.assign(new Node('#text'), { text: s }),
     querySelector: s => (s === '#target' ? target : s === '#btn' ? button : null),
@@ -414,6 +417,24 @@ function fillIn(root) {
     check('/v1/preview embedded layout: card only, no page header', t3.calls.length === 0 && !!find(t3.target.children[0].shadowRoot, tag('form')).length
       && !find(t3.target.children[0].shadowRoot, n => n.getAttribute('class') === 'page').length);
     check('no key/slug outside preview: nothing', t2.calls.length === 0 && t2.target.children.length === 0);
+  }
+
+  // ── loaded by jQuery (Bubble/Webflow HTML element): currentScript null or a bare copy ─────────
+  {
+    const K = 'pk_' + 'a'.repeat(48);
+    const pasted = fakeScript(HOST + '/v1/form.js', { 'data-key': K, 'data-target': '#target' });
+    const t = load({ attrs: {}, config: ok(CFG), submit: {}, current: null, scripts: [fakeScript(HOST + '/v1/form.js.map', { 'data-key': K }), pasted] });
+    await flush();
+    check('jQuery eval (no currentScript): finds the pasted tag, renders', t.calls[0] && t.calls[0].url === HOST + '/v1/form/config?key=' + K && t.target.children.length === 1);
+    check('the tag it used is marked taken (a second form takes the next tag)', pasted.getAttribute('data-cc-taken') === '');
+    const t2 = load({ attrs: {}, config: ok(CFG), submit: {}, current: fakeScript(HOST + '/v1/form.js', {}), scripts: [fakeScript(HOST + '/v1/form.js', { 'data-key': K, 'data-target': '#target' })] });
+    await flush();
+    check('jQuery script-transport copy without attributes: falls back to the pasted tag', t2.calls.length === 1 && t2.target.children.length === 1);
+    // Already-taken tags are skipped:
+    const taken = fakeScript(HOST + '/v1/form.js', { 'data-key': K, 'data-target': '#target', 'data-cc-taken': '' });
+    const t4 = load({ attrs: {}, config: ok(CFG), submit: {}, current: null, scripts: [taken] });
+    await flush();
+    check('a tag another widget already took is not reused', t4.calls.length === 0);
   }
 
   check('form.js never uses innerHTML', !/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(SRC));

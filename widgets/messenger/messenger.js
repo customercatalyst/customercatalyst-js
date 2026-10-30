@@ -18,7 +18,7 @@
  */
 (function () {
   'use strict';
-  var script = document.currentScript;
+  var script = ownScript('messenger.js');
   if (!script || !script.src) return;
   var HOST = new URL(script.src).origin;
   if (window.CustomerCatalystMessenger && window.CustomerCatalystMessenger.loaded) return; // pasted twice

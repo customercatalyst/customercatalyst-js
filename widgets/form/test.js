@@ -430,6 +430,12 @@ function fillIn(root) {
     const t2 = load({ attrs: {}, config: ok(CFG), submit: {}, current: fakeScript(HOST + '/v1/form.js', {}), scripts: [fakeScript(HOST + '/v1/form.js', { 'data-key': K, 'data-target': '#target' })] });
     await flush();
     check('jQuery script-transport copy without attributes: falls back to the pasted tag', t2.calls.length === 1 && t2.target.children.length === 1);
+    // No data-target / data-open: the form is drawn right where the tag was pasted.
+    const box = new Node('div'), tagEl = fakeScript(HOST + '/v1/form.js', { 'data-key': K });
+    box.appendChild(tagEl); tagEl.parentNode = box;
+    const t5 = load({ attrs: {}, config: ok(CFG), submit: {}, current: tagEl });
+    await flush();
+    check('no target given: form drawn just before its own tag', box.children.length === 2 && box.children[1] === tagEl && !!box.children[0].children[0] && !!box.children[0].children[0].shadowRoot);
     // Already-taken tags are skipped:
     const taken = fakeScript(HOST + '/v1/form.js', { 'data-key': K, 'data-target': '#target', 'data-cc-taken': '' });
     const t4 = load({ attrs: {}, config: ok(CFG), submit: {}, current: null, scripts: [taken] });

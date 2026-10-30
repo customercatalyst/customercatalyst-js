@@ -333,6 +333,11 @@
   function start() {
     var target = null, opener = null;
     try { target = attr('data-target') && document.querySelector(attr('data-target')); opener = attr('data-open') && document.querySelector(attr('data-open')); } catch (e) { /* bad selector */ }
+    // No target and no button: the form goes where the tag was pasted (not in <head>).
+    if (!target && !opener && !hosted && !preview && script.parentNode && script.parentNode !== document.head) {
+      target = document.createElement('div');
+      script.parentNode.insertBefore(target, script);
+    }
     if (!target && !opener) return;
     var got = key || slug
       ? fetch(HOST + '/v1/form/config?' + (key ? 'key=' + encodeURIComponent(key) : 'slug=' + encodeURIComponent(slug)), { credentials: 'omit' })

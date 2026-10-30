@@ -1,0 +1,25 @@
+{
+  // Cloudflare Pages project fronting the Messenger/form Worker (worker/), same pattern as
+  // customercatalyst-mcp: customercatalyst.io DNS is at datacenter.no, and a Pages custom domain works
+  // from an external CNAME where a Worker custom domain would need the zone on Cloudflare.
+  //
+  // Deploy TEST:  npx wrangler pages deploy --project-name customercatalyst-widget --branch test --commit-dirty=true
+  //   → https://test.customercatalyst-widget.pages.dev (any non-production branch uses env.preview)
+  // Deploy LIVE:  same with --branch main, AFTER `wrangler deploy --env production` in worker/.
+  // --branch is not optional: without it wrangler infers it from git (see mcp-proxy/wrangler.jsonc).
+  "name": "customercatalyst-widget",
+  "compatibility_date": "2026-10-29",
+  "pages_build_output_dir": "./public",
+
+  // Pages only knows env.production and env.preview; each names its own Worker, so a preview
+  // deployment can never reach LIVE data and production never TEST data.
+  "env": {
+    "production": {
+      // widget.customercatalyst.io → LIVE. Not deployed yet (messenger-live-cutover.md, steps 8 + 8a).
+      "services": [{ "binding": "WIDGET", "service": "customercatalyst-messenger" }]
+    },
+    "preview": {
+      "services": [{ "binding": "WIDGET", "service": "customercatalyst-messenger-test" }]
+    }
+  }
+}

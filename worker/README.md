@@ -150,8 +150,8 @@ Messenger).
 
 | env | Worker | URL |
 |---|---|---|
-| `test` | customercatalyst-messenger-test | https://customercatalyst-messenger-test.customercatalyst.workers.dev |
-| `production` | customercatalyst-messenger | widget.customercatalyst.io via a Pages proxy + service binding (configured, not deployed) |
+| `test` | customercatalyst-messenger-test | https://test.customercatalyst-widget.pages.dev (Pages proxy, `../pages-proxy`); its workers.dev URL still works |
+| `production` | customercatalyst-messenger | widget.customercatalyst.io via the same Pages proxy (`main` branch; configured, not deployed) |
 
 Always pass `--env`. Secrets per env: `MESSENGER_WORKER_SECRET`, `TURNSTILE_SECRET`
 (`wrangler secret bulk <file> --env test`, never on the command line).

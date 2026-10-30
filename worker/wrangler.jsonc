@@ -8,9 +8,9 @@
   "account_id": "21649d75dfaa2b2797d371a308d5f078",
   "workers_dev": false,
   "preview_urls": false,
-  // form.js is served from here, but only through the Worker (/v1/form.js):
-  // run_worker_first keeps every other file in the folder unreachable.
-  "assets": { "directory": "../widgets/form", "binding": "ASSETS", "run_worker_first": true },
+  // The widgets are served from here, but only through the Worker (/v1/form.js, /v1/messenger.js,
+  // each bundled with shared/kit.js): run_worker_first keeps every file unreachable by its own path.
+  "assets": { "directory": "../widgets", "binding": "ASSETS", "run_worker_first": true },
   "observability": { "enabled": true },
 
   "env": {
@@ -26,13 +26,24 @@
         // "managed" (visible widget) | "invisible". Invisible also needs the sitekey switched:
         // wrangler turnstile widget update <sitekey> --mode invisible (see README).
         "TURNSTILE_MODE": "managed",
-        "PRIVACY_URL": ""
+        "PRIVACY_URL": "",
+        // Settings pages (Bubble) that may frame /v1/preview and /v1/messenger/preview, and the only
+        // origins whose preview messages the widgets accept. Space-separated https origins.
+        "PREVIEW_PARENT_ORIGINS": "https://app.customercatalyst.io https://customer-catalyst-15453.bubbleapps.io"
       },
       // Limits count per Cloudflare location, per key (docs: rate-limit binding).
       "ratelimits": [
         { "name": "RL_CONFIG_IP", "namespace_id": "6101", "simple": { "limit": 60, "period": 60 } },
         { "name": "RL_SUBMIT_IP", "namespace_id": "6102", "simple": { "limit": 5, "period": 60 } },
-        { "name": "RL_SUBMIT_KEY", "namespace_id": "6103", "simple": { "limit": 30, "period": 60 } }
+        { "name": "RL_SUBMIT_KEY", "namespace_id": "6103", "simple": { "limit": 30, "period": 60 } },
+        // Phase 2 conversations: list/thread polls + file downloads (thread polls 6/min), and replies.
+        { "name": "RL_READ_IP", "namespace_id": "6104", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_REPLY_IP", "namespace_id": "6105", "simple": { "limit": 20, "period": 60 } },
+        // The list fans out to several reads: its own per-IP limit. Per key (all of a site's visitors):
+        // list + thread + file, and replies.
+        { "name": "RL_LIST_IP", "namespace_id": "6106", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_READ_KEY", "namespace_id": "6107", "simple": { "limit": 1200, "period": 60 } },
+        { "name": "RL_REPLY_KEY", "namespace_id": "6108", "simple": { "limit": 60, "period": 60 } }
       ]
     },
     // Configured, NOT deployed (LIVE cutover: docs/scopes/messenger-live-cutover.md in
@@ -50,12 +61,23 @@
         "TURNSTILE_SITEKEY": "",
         "HOSTED_HOST": "",
         "TURNSTILE_MODE": "managed",
-        "PRIVACY_URL": ""
+        "PRIVACY_URL": "",
+        // Settings pages (Bubble) that may frame /v1/preview and /v1/messenger/preview, and the only
+        // origins whose preview messages the widgets accept. Space-separated https origins.
+        "PREVIEW_PARENT_ORIGINS": "https://app.customercatalyst.io https://customer-catalyst-15453.bubbleapps.io"
       },
       "ratelimits": [
         { "name": "RL_CONFIG_IP", "namespace_id": "6201", "simple": { "limit": 60, "period": 60 } },
         { "name": "RL_SUBMIT_IP", "namespace_id": "6202", "simple": { "limit": 5, "period": 60 } },
-        { "name": "RL_SUBMIT_KEY", "namespace_id": "6203", "simple": { "limit": 30, "period": 60 } }
+        { "name": "RL_SUBMIT_KEY", "namespace_id": "6203", "simple": { "limit": 30, "period": 60 } },
+        // Phase 2 conversations: list/thread polls + file downloads (thread polls 6/min), and replies.
+        { "name": "RL_READ_IP", "namespace_id": "6204", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_REPLY_IP", "namespace_id": "6205", "simple": { "limit": 20, "period": 60 } },
+        // The list fans out to several reads: its own per-IP limit. Per key (all of a site's visitors):
+        // list + thread + file, and replies.
+        { "name": "RL_LIST_IP", "namespace_id": "6206", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_READ_KEY", "namespace_id": "6207", "simple": { "limit": 1200, "period": 60 } },
+        { "name": "RL_REPLY_KEY", "namespace_id": "6208", "simple": { "limit": 60, "period": 60 } }
       ]
     }
   }

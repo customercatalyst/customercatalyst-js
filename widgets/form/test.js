@@ -3,7 +3,9 @@
 // the calls form.js makes) via new Function, with fetch/location/storage stubbed.
 const fs = require('fs');
 const path = require('path');
-const SRC = fs.readFileSync(path.join(__dirname, 'form.js'), 'utf8');
+// The same bundle the Worker serves (worker/src/index.js widgetJs): kit + form in one closure.
+const SRC = "(function () {\n'use strict';\n" + fs.readFileSync(path.join(__dirname, '../shared/kit.js'), 'utf8') + '\n'
+  + fs.readFileSync(path.join(__dirname, 'form.js'), 'utf8') + '\n})();\n';
 const HOST = 'https://cc.example';
 
 let pass = 0, fail = 0;
@@ -63,7 +65,7 @@ function load({ attrs, config, submit, location }) {
   const loc = Object.assign({ origin: 'https://shop.example', assigned: null, assign(u) { this.assigned = u; } }, location);
   new Function('window', 'document', 'location', 'localStorage', 'fetch', SRC)(window, document, loc, localStorage, fetch);
   const post = (data, origin = HOST, source) => (window.listeners.message || []).forEach(fn => fn({ origin, source, data }));
-  const fromParent = (config, source = parentWin) => post({ type: 'cc-form-preview', config }, 'https://app.bubble.example', source);
+  const fromParent = (config, source = parentWin, origin = 'https://app.bubble.example') => post({ type: 'cc-form-preview', config }, origin, source);
   return { window, document, body, target, button, calls, mem, loc, post, fromParent };
 }
 
@@ -83,6 +85,7 @@ const CFG = {
   ],
 };
 const ok = cfg => ({ body: { success: true, config: cfg } });
+const PARENTS = 'https://app.bubble.example https://x.bubbleapps.io javascript:alert(1) *';
 const control = (root, label) => {
   const l = find(root, n => n.tagName === 'label' && n.textContent.startsWith(label))[0];
   if (!l) return null;
@@ -255,6 +258,31 @@ function fillIn(root) {
     check('server field error lands under the field', control(root, 'Subject').getAttribute('aria-invalid') === 'true' && root.textContent.includes('Too long.'));
   }
 
+  // ── org daily cap ─────────────────────────────────────────────────────────
+  {
+    const t = load({ attrs: { 'data-key': 'pk_' + 'q'.repeat(48), 'data-target': '#target' }, config: ok(Object.assign({}, CFG, { topics: [], fields: [] })),
+      submit: { status: 429, body: { success: false, error: 'daily_limit' } } });
+    await flush();
+    const root = t.target.children[0].shadowRoot;
+    fillIn(root);
+    t.post({ type: 'cc-turnstile', token: 'tok' }, HOST, find(root, tag('iframe'))[0].contentWindow);
+    find(root, tag('form'))[0].fire('submit');
+    await flush();
+    check('daily_limit (429): "please email us", not "wait a minute"', root.textContent.includes("We can't take more messages right now. Please email us instead.") && !root.textContent.includes('Wait a minute'));
+  }
+
+  {
+    const t = load({ attrs: { 'data-key': 'pk_' + 'r'.repeat(48), 'data-target': '#target' }, config: ok(Object.assign({}, CFG, { topics: [], fields: [] })),
+      submit: { status: 503, body: { success: false, error: 'try_again' } } });
+    await flush();
+    const root = t.target.children[0].shadowRoot;
+    fillIn(root);
+    t.post({ type: 'cc-turnstile', token: 'tok' }, HOST, find(root, tag('iframe'))[0].contentWindow);
+    find(root, tag('form'))[0].fire('submit');
+    await flush();
+    check('try_again (503): "Something went wrong. Please try again.", input kept', root.textContent.includes('Something went wrong. Please try again.') && control(root, 'Subject').value === 'Code never arrives');
+  }
+
   // ── redirect after send ──────────────────────────────────────────────────
   {
     const t = load({ attrs: { 'data-slug': 'sightl', 'data-target': '#target' },
@@ -342,12 +370,15 @@ function fillIn(root) {
     check('preview message ignored outside preview mode', find(t.target.children[0].shadowRoot, tag('h2'))[0].textContent === CFG.title);
   }
   {
-    const t = load({ attrs: { 'data-slug': 'sightl', 'data-target': '#target', 'data-mode': 'hosted', 'data-preview': '1' }, config: ok(CFG) });
+    const t = load({ attrs: { 'data-slug': 'sightl', 'data-target': '#target', 'data-mode': 'hosted', 'data-preview': '1', 'data-parents': PARENTS }, config: ok(CFG) });
     await flush();
     const root = () => t.target.children[0].shadowRoot;
-    check('preview: tells the parent it is ready, once, with no data', JSON.stringify(t.window.parent.posted) === JSON.stringify([[{ type: 'cc-form-preview-ready' }, '*']]));
+    check('preview: tells each listed settings origin it is ready, with no data, never "*"', JSON.stringify(t.window.parent.posted)
+      === JSON.stringify([[{ type: 'cc-form-preview-ready' }, 'https://app.bubble.example'], [{ type: 'cc-form-preview-ready' }, 'https://x.bubbleapps.io']]));
     t.fromParent({ title: 'Not from parent' }, {});
     check('preview: message from another window ignored', find(root(), tag('h2'))[0].textContent === CFG.title);
+    t.fromParent({ title: 'Wrong origin' }, undefined, 'https://evil.example');
+    check('preview: message from the parent on an unlisted origin ignored', find(root(), tag('h2'))[0].textContent === CFG.title);
     t.fromParent({ title: '<b>New title</b>', color: 'red;}*{display:none', help_site_url: 'javascript:alert(1)', help_mode: 'link', enabled: 'yes',
       topics: [{ id: 't9', name: 'Returns', short_text: 'x', article_url: 'javascript:alert(1)' }, 'junk'], fields: 'nope' });
     const r = root();
@@ -364,7 +395,7 @@ function fillIn(root) {
     check('preview: Send still disabled, scroll kept, nothing sent', find(root(), n => n.getAttribute('type') === 'submit')[0].disabled && t.window.scrolled === 120 && t.calls.length === 1);
   }
   {
-    const t = load({ attrs: { 'data-target': '#target', 'data-mode': 'hosted', 'data-preview': '1' }, config: ok(CFG) });
+    const t = load({ attrs: { 'data-target': '#target', 'data-mode': 'hosted', 'data-preview': '1', 'data-parents': PARENTS }, config: ok(CFG) });
     await flush();
     const root = () => t.target.children[0].shadowRoot;
     check('/v1/preview (no key/slug): defaults rendered, no request', t.calls.length === 0 && find(root(), tag('h2'))[0].textContent === 'Contact support');

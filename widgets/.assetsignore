@@ -1,0 +1,3 @@
+# Only the widget files are assets; the Worker serves them bundled at /v1/form.js and /v1/messenger.js.
+test.js
+.assetsignore

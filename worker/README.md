@@ -1,7 +1,8 @@
 # Messenger Worker
 
-Serves the support form widget (`../widgets/form/form.js`) and sits between visitors' browsers and
-the Supabase `messenger` function. Contract and decisions:
+Serves the support form (`../widgets/form/form.js`) and Messenger (`../widgets/messenger/messenger.js`)
+widgets and sits between visitors' browsers and the Supabase `messenger` function. Each widget is served
+as one closure around `../widgets/shared/kit.js` (helpers both use) and the widget file; no build step. Contract and decisions:
 `customercatalyst-dev/docs/scopes/messenger.md` ("Phase 1 build contract").
 
 ## Wire shapes (Worker ⇄ function, browser ⇄ Worker)
@@ -105,12 +106,45 @@ form.js accepts it only in preview mode and only from `window.parent`. It merges
 what it has and re-renders in place. Values go through the same clean-up as a fetched config.
 Send stays disabled, so nothing is ever sent.
 
+### Messenger (phase 1b)
+
+Same shapes as the form, key only (a slug answers 400):
+`GET /v1/messenger/config?key=pk_…` → function action `messenger_config` (cached 60 s per key + host,
+apart from the form config); `POST /v1/messenger/submit` (multipart, same fields as the form submit) →
+`messenger_submit`. The config is the form's plus `messenger: { position: "left"|"right",
+launcher_shown, icon: "bubble"|"question"|"headset"|"dots"|"envelope", texts: { title, greeting,
+reply_time, new_button, message_hint, after_send } }` ("" = widget default; greeting and after_send keep
+line breaks, ≤2000 chars, the others are one line). Submit success may carry `confirmation: false` (no
+confirmation mail went out): Sent then promises no copy. Missing = true. Errors the widget words
+itself: `messenger_closed` (403), `daily_limit` (429, also on the form), `rate_limited` (429), `try_again` (503, also on the form; the input stays).
+Submit (form and Messenger) and `/v1/messenger/reply` success may carry `files_failed: <n>`: the message
+went in, n files could not be stored; the widget says so.
+
+Phase 2 routes (POST, token only in bodies): `/v1/messenger/conversations` {key, tokens[≤20]}
+(malformed tokens dropped, indexes kept; non-array / >20 → 400; limits: `RL_LIST_IP` 10/min per IP +
+`RL_READ_KEY`), `/thread` and `/file` (`RL_READ_IP` + `RL_READ_KEY`), `/reply` multipart
+(`RL_REPLY_IP` + `RL_REPLY_KEY`) → `{success, id, at, ticket_id_label?, files_failed?}`;
+`ticket_id_label` only when a Closed ticket got a follow-up, the same token now points at it.
+
+Settings preview: frame `<host>/v1/messenger/preview` and send
+`postMessage({ type: "cc-messenger-preview", config }, "<host>")`; it opens on Home and re-renders in place,
+staying on the screen in view. It answers `{ type: "cc-messenger-preview-ready" }` on every load.
+
+### Preview framing
+
+`/v1/preview` and `/v1/messenger/preview` send `frame-ancestors` = the `PREVIEW_PARENT_ORIGINS` var
+(space-separated https origins, the Bubble app hosts) and pass the same list to the widget, which
+accepts a preview message only from `window.parent` on one of those origins and sends its ready ping
+to those origins only (never `"*"`).
+
 ## Routes
 
 `GET /v1/form.js` · `GET /v1/form/config` · `GET /v1/turnstile?origin=<page origin>` (Turnstile on
 our host, token posted to that origin only) · `POST /v1/form/submit` · `GET /f/<slug>` (hosted page;
 production: `widget.customercatalyst.io/f/<slug>`) · `GET /v1/preview` (settings preview with
-nothing saved yet) · `GET /demo?key=pk_…&slug=…` (test env only).
+nothing saved yet) · `GET /v1/messenger.js` · `GET /v1/messenger/config` · `POST /v1/messenger/submit` ·
+`GET /v1/messenger/preview` · `GET /demo?key=pk_…&slug=…` (test env only; with a key it also loads the
+Messenger).
 
 ## Environments
 

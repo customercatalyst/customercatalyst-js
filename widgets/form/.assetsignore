@@ -1,2 +1,0 @@
-# Only form.js is a public asset; the Worker serves it at /v1/form.js.
-test.js

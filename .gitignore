@@ -10,3 +10,4 @@ dist/
 .wrangler/
 CLAUDE.md
 .claude/
+.dev.vars

@@ -1,0 +1,62 @@
+{
+  // Always deploy with --env test or --env production. The top level only exists
+  // because wrangler requires it: a bare `wrangler deploy` makes a stray, unrouted
+  // Worker instead of overwriting a real one.
+  "name": "customercatalyst-messenger-local",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-29",
+  "account_id": "21649d75dfaa2b2797d371a308d5f078",
+  "workers_dev": false,
+  "preview_urls": false,
+  // form.js is served from here, but only through the Worker (/v1/form.js):
+  // run_worker_first keeps every other file in the folder unreachable.
+  "assets": { "directory": "../widgets/form", "binding": "ASSETS", "run_worker_first": true },
+  "observability": { "enabled": true },
+
+  "env": {
+    "test": {
+      "name": "customercatalyst-messenger-test",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": {
+        "ENVIRONMENT": "test",
+        "SUPABASE_FUNCTION_URL": "https://tqrwkscxilrwnbwlrkpa.supabase.co/functions/v1/messenger",
+        "TURNSTILE_SITEKEY": "0x4AAAAAAFr0NFpzRiNihaXe",
+        "HOSTED_HOST": "",
+        // "managed" (visible widget) | "invisible". Invisible also needs the sitekey switched:
+        // wrangler turnstile widget update <sitekey> --mode invisible (see README).
+        "TURNSTILE_MODE": "managed",
+        "PRIVACY_URL": ""
+      },
+      // Limits count per Cloudflare location, per key (docs: rate-limit binding).
+      "ratelimits": [
+        { "name": "RL_CONFIG_IP", "namespace_id": "6101", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SUBMIT_IP", "namespace_id": "6102", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_SUBMIT_KEY", "namespace_id": "6103", "simple": { "limit": 30, "period": 60 } }
+      ]
+    },
+    // Configured, NOT deployed (LIVE cutover: docs/scopes/messenger-live-cutover.md in
+    // customercatalyst-dev). Set TURNSTILE_SITEKEY to the live widget's key first.
+    "production": {
+      "name": "customercatalyst-messenger",
+      "workers_dev": false,
+      "preview_urls": false,
+      // No routes: customercatalyst.io DNS is not on Cloudflare. widget.customercatalyst.io is a Pages
+      // project (CNAME at the DNS host, like mcp.) whose _worker.js forwards to this Worker through a
+      // service binding. See messenger-live-cutover.md in customercatalyst-dev, step 8a.
+      "vars": {
+        "ENVIRONMENT": "production",
+        "SUPABASE_FUNCTION_URL": "https://xfjgmzwigomtfmaloeun.supabase.co/functions/v1/messenger",
+        "TURNSTILE_SITEKEY": "",
+        "HOSTED_HOST": "",
+        "TURNSTILE_MODE": "managed",
+        "PRIVACY_URL": ""
+      },
+      "ratelimits": [
+        { "name": "RL_CONFIG_IP", "namespace_id": "6201", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SUBMIT_IP", "namespace_id": "6202", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_SUBMIT_KEY", "namespace_id": "6203", "simple": { "limit": 30, "period": 60 } }
+      ]
+    }
+  }
+}

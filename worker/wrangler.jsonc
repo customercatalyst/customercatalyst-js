@@ -11,7 +11,9 @@
   // The widgets are served from here, but only through the Worker (/v1/form.js, /v1/messenger.js,
   // each bundled with shared/kit.js): run_worker_first keeps every file unreachable by its own path.
   "assets": { "directory": "../widgets", "binding": "ASSETS", "run_worker_first": true },
-  "observability": { "enabled": true },
+  // Invocation logs record each request URL, and /s/<token> carries a live survey token: off. Our own
+  // console.log lines (PII-free) are kept.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
 
   "env": {
     "test": {
@@ -21,6 +23,8 @@
       "vars": {
         "ENVIRONMENT": "test",
         "SUPABASE_FUNCTION_URL": "https://tqrwkscxilrwnbwlrkpa.supabase.co/functions/v1/messenger",
+        // NPS survey pages (/s/<token>); secret SURVEYS_WORKER_SECRET.
+        "SURVEYS_FUNCTION_URL": "https://tqrwkscxilrwnbwlrkpa.supabase.co/functions/v1/surveys",
         "TURNSTILE_SITEKEY": "0x4AAAAAAFr0NFpzRiNihaXe",
         "HOSTED_HOST": "",
         // "managed" (visible widget) | "invisible". Invisible also needs the sitekey switched:
@@ -43,7 +47,10 @@
         // list + thread + file, and replies.
         { "name": "RL_LIST_IP", "namespace_id": "6106", "simple": { "limit": 10, "period": 60 } },
         { "name": "RL_READ_KEY", "namespace_id": "6107", "simple": { "limit": 1200, "period": 60 } },
-        { "name": "RL_REPLY_KEY", "namespace_id": "6108", "simple": { "limit": 60, "period": 60 } }
+        { "name": "RL_REPLY_KEY", "namespace_id": "6108", "simple": { "limit": 60, "period": 60 } },
+        // NPS survey pages: page loads + answers + unsubscribes per IP, and per recipient token.
+        { "name": "RL_SURVEY_IP", "namespace_id": "6109", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SURVEY_TOKEN", "namespace_id": "6110", "simple": { "limit": 20, "period": 60 } }
       ]
     },
     // Configured, NOT deployed (LIVE cutover: docs/scopes/messenger-live-cutover.md in
@@ -58,6 +65,8 @@
       "vars": {
         "ENVIRONMENT": "production",
         "SUPABASE_FUNCTION_URL": "https://xfjgmzwigomtfmaloeun.supabase.co/functions/v1/messenger",
+        // NPS survey pages (/s/<token>); secret SURVEYS_WORKER_SECRET.
+        "SURVEYS_FUNCTION_URL": "https://xfjgmzwigomtfmaloeun.supabase.co/functions/v1/surveys",
         "TURNSTILE_SITEKEY": "",
         "HOSTED_HOST": "",
         "TURNSTILE_MODE": "managed",
@@ -77,7 +86,10 @@
         // list + thread + file, and replies.
         { "name": "RL_LIST_IP", "namespace_id": "6206", "simple": { "limit": 10, "period": 60 } },
         { "name": "RL_READ_KEY", "namespace_id": "6207", "simple": { "limit": 1200, "period": 60 } },
-        { "name": "RL_REPLY_KEY", "namespace_id": "6208", "simple": { "limit": 60, "period": 60 } }
+        { "name": "RL_REPLY_KEY", "namespace_id": "6208", "simple": { "limit": 60, "period": 60 } },
+        // NPS survey pages: page loads + answers + unsubscribes per IP, and per recipient token.
+        { "name": "RL_SURVEY_IP", "namespace_id": "6209", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SURVEY_TOKEN", "namespace_id": "6210", "simple": { "limit": 20, "period": 60 } }
       ]
     }
   }

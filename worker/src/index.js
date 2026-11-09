@@ -24,12 +24,18 @@ export default {
     try {
       const api = path.match(/^\/v1\/(form|messenger)\/(config|submit)$/);
       const conv = path.match(/^\/v1\/messenger\/(conversations|thread|reply|file)$/);
+      const survey = path.match(/^\/s\/([^/]+)(\/unsubscribe|\/logo)?$/);
       if (method === 'OPTIONS' && (api || conv)) return preflight(request);
+      if (method === 'POST' && (path === '/v1/survey/answer' || path === '/v1/survey/unsubscribe')) return await surveyPost(request, env, url, path.slice(11));
+      if (method === 'POST' && survey && survey[2] === '/unsubscribe') return await oneClickUnsubscribe(request, env, survey[1]);
       if (method === 'POST' && api && api[2] === 'submit') return await submit(request, env, url, api[1]);
       if (method === 'POST' && conv) return await (conv[1] === 'reply' ? reply(request, env, url) : conversation(request, env, url, conv[1]));
       if (method !== 'GET' && method !== 'HEAD') return text(405, 'Method not allowed');
       if (path === '/v1/form.js') return await widgetJs(env, url, 'form/form.js');
       if (path === '/v1/messenger.js') return await widgetJs(env, url, 'messenger/messenger.js');
+      if (path === '/v1/survey.js') return await widgetJs(env, url, 'survey/survey.js');
+      if (survey && survey[2] === '/logo') return await surveyLogo(request, env, survey[1]);
+      if (survey) return await surveyPage(request, env, survey[1], survey[2] ? 'unsubscribe' : 'answer');
       if (api && api[2] === 'config') return await config(request, env, ctx, url, api[1]);
       if (path === '/v1/turnstile') return turnstilePage(env, url);
       if (path === '/v1/preview') return previewPage(url, env);
@@ -359,8 +365,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 // JSON inside <script>: escape '<' so a value can never close the tag.
 const jsLit = v => JSON.stringify(v).replace(/</g, '\\u003c');
 
-function html(body, csp) {
+function html(body, csp, status = 200) {
   return new Response(body, {
+    status,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': csp,
@@ -487,4 +494,103 @@ ${attr ? `<script src="/v1/form.js" ${attr} data-target="#cc-support-form" async
 <script src="/v1/form.js" ${attr} data-open="#contact-btn" async></script>` : ''}
 ${k ? `<script src="/v1/messenger.js" data-key="${esc(k)}" async></script>` : ''}
 </body></html>`, PAGE_CSP + "; frame-ancestors 'none'");
+}
+
+// ── NPS surveys ────────────────────────────────────────────────────────────
+// /s/<token>[?score=N] answers, /s/<token>/unsubscribe opts out (per org). The Supabase `surveys`
+// function holds the data; the token (survey_recipient.Token) is the only key, so it never goes
+// into a function URL or a log line here. Contract: customercatalyst-dev docs/scopes/nps-survey.md §5.
+// Limits: everything per IP (RL_SURVEY_IP), and per token (RL_SURVEY_TOKEN).
+
+function callSurveys(env, body) {
+  return fetch(env.SURVEYS_FUNCTION_URL, {
+    method: 'POST',
+    headers: { 'X-CC-Worker-Secret': env.SURVEYS_WORKER_SECRET, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+const surveysConfigured = env => env.SURVEYS_FUNCTION_URL && env.SURVEYS_WORKER_SECRET;
+async function surveyLimited(env, request, token) {
+  return !(await env.RL_SURVEY_IP.limit({ key: ipOf(request) })).success ||
+    !(await env.RL_SURVEY_TOKEN.limit({ key: token })).success;
+}
+const SURVEY_KEYS = ['org_name', 'logo_url', 'color', 'question', 'comment_question', 'thank_you_title', 'thank_you_body', 'open', 'answered', 'score', 'comment'];
+
+// The page, with the display fields as inert JSON (script-src 'self' never runs it); survey.js
+// renders them with textContent. No referrer: the URL carries the token. The logo is only ever our
+// own /s/<token>/logo (the file behind it is private), whatever the function sends.
+async function surveyPage(request, env, token, mode) {
+  let state = 'invalid', survey = null, status = 404;
+  if (TOKEN_RE.test(token)) {
+    if (!surveysConfigured(env)) { state = 'error'; status = 503; }
+    else if (await surveyLimited(env, request, token)) { state = 'error'; status = 429; }
+    else {
+      const res = await callSurveys(env, { action: 'survey', token });
+      const b = await relayJson(res);
+      if (res.status === 200 && b && b.success && b.survey) { state = 'ok'; status = 200; survey = pick(b.survey, SURVEY_KEYS); survey.logo_url = survey.logo_url ? '/s/' + token + '/logo' : ''; }
+      else if (res.status !== 404) { state = 'error'; status = 502; }
+    }
+  }
+  const data = state === 'ok' ? { state, mode, token, survey } : { state };
+  const title = mode === 'unsubscribe' ? 'Unsubscribe' : 'Survey';
+  const res = html(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title>
+<style>body{margin:0;background:#F3F5F4}</style></head>
+<body><main id="cc-survey"></main>
+<script type="application/json" id="cc-survey-data">${jsLit(data)}</script>
+<script src="/v1/survey.js" async></script>
+</body></html>`, PAGE_CSP + "; frame-ancestors 'none'", status);
+  res.headers.set('Referrer-Policy', 'no-referrer');
+  return res;
+}
+
+// GET /s/<token>/logo: the org logo (a private Bubble file), as bytes the function fetched. Only
+// the image types it may answer pass; anything else is a plain 404, so the page shows the monogram.
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+async function surveyLogo(request, env, token) {
+  if (!TOKEN_RE.test(token)) return text(404, 'Not found');
+  if (!surveysConfigured(env)) return text(503, 'Not configured');
+  if (await surveyLimited(env, request, token)) return text(429, 'Too many requests');
+  const res = await callSurveys(env, { action: 'logo', token });
+  const ct = (res.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  if (res.status !== 200 || !LOGO_TYPES.includes(ct)) { await res.body?.cancel(); return text(404, 'Not found'); }
+  return new Response(res.body, {
+    status: 200,
+    headers: {
+      'Content-Type': ct,
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
+// POST /v1/survey/answer {token, score 0–10, comment?} · /v1/survey/unsubscribe {token}, from our own page only.
+async function surveyPost(request, env, url, route) {
+  const page = pageOf(request, url);
+  if (!page || !page.origin || page.host !== url.host) return json(403, { success: false, error: 'origin_required' });
+  if (!surveysConfigured(env)) return json(503, { success: false, error: 'not_configured' });
+  const b = await readJson(request);
+  if (!b || typeof b.token !== 'string' || !TOKEN_RE.test(b.token)) return json(400, { success: false, error: 'bad_request' });
+  let body = { action: 'unsubscribe', token: b.token };
+  if (route === 'answer') {
+    if (!Number.isInteger(b.score) || b.score < 0 || b.score > 10) return json(400, { success: false, error: 'bad_score' });
+    if (b.comment !== undefined && (typeof b.comment !== 'string' || b.comment.length > 2000)) return json(400, { success: false, error: 'bad_comment' });
+    body = { action: 'answer', token: b.token, score: b.score, ...(b.comment !== undefined ? { comment: b.comment } : {}) };
+  }
+  if (await surveyLimited(env, request, b.token)) return json(429, { success: false, error: 'rate_limited' });
+  return relay(await callSurveys(env, body), ['success', 'error', 'org_name'], null);
+}
+
+// RFC 8058 one-click unsubscribe: mail providers POST "List-Unsubscribe=One-Click" to the URL in
+// the List-Unsubscribe header (no Origin, no page). Same opt-out as the button.
+async function oneClickUnsubscribe(request, env, token) {
+  const len = Number(request.headers.get('Content-Length'));
+  if (!TOKEN_RE.test(token) || !len || len > 1024) return text(400, 'Bad request');
+  if ((await request.text()).trim() !== 'List-Unsubscribe=One-Click') return text(400, 'Bad request');
+  if (!surveysConfigured(env)) return text(503, 'Not configured');
+  if (await surveyLimited(env, request, token)) return text(429, 'Too many requests');
+  const res = await callSurveys(env, { action: 'unsubscribe', token });
+  await res.body?.cancel();
+  return res.ok ? text(200, 'Unsubscribed') : text(res.status === 404 ? 404 : 502, res.status === 404 ? 'Not found' : 'Try again');
 }

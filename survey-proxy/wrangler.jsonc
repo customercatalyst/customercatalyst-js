@@ -1,0 +1,19 @@
+{
+  // Cloudflare Pages project for the NPS survey pages, a second front door to the same Worker as
+  // pages-proxy (customercatalyst-widget). Own name so survey links don't say "widget".
+  //
+  // Deploy TEST:  npx wrangler pages deploy --project-name customercatalyst-survey --branch test --commit-dirty=true
+  //   → https://test.customercatalyst-survey.pages.dev
+  // Deploy LIVE:  same with --branch main → survey.customercatalyst.io (CNAME at datacenter.no).
+  "name": "customercatalyst-survey",
+  "compatibility_date": "2026-10-29",
+  "pages_build_output_dir": "./public",
+  "env": {
+    "production": {
+      "services": [{ "binding": "WIDGET", "service": "customercatalyst-messenger" }]
+    },
+    "preview": {
+      "services": [{ "binding": "WIDGET", "service": "customercatalyst-messenger-test" }]
+    }
+  }
+}

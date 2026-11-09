@@ -512,3 +512,88 @@ test('unknown paths 404', async () => {
   assert.equal((await call('/')).status, 404);
   assert.equal((await call('/v1/nope')).status, 404);
 });
+
+// ── NPS surveys ────────────────────────────────────────────────────────────
+const surveyEnv = (extra = {}) => envFor('test', { SURVEYS_FUNCTION_URL: 'https://fn.example/functions/v1/surveys', SURVEYS_WORKER_SECRET: 'ssecret',
+  RL_SURVEY_IP: limiter('survey_ip'), RL_SURVEY_TOKEN: limiter('survey_token'), ...extra });
+const sameOrigin = body => ({ method: 'POST', headers: { Origin: BASE, 'Content-Type': 'application/json', 'Content-Length': String(JSON.stringify(body).length) }, body: JSON.stringify(body) });
+
+test('survey page: malformed token → 404 "invalid" without calling the function', async () => {
+  const res = await call('/s/short', {}, surveyEnv());
+  assert.equal(res.status, 404);
+  assert.match(await res.text(), /"state":"invalid"/);
+  assert.equal(upstream.length, 0);
+});
+
+test('survey page: display fields only, inert JSON, no referrer', async () => {
+  globalThis.fetch = async (url, opts) => { upstream.push({ url, opts }); return Response.json({ success: true, survey: { org_name: '</script><b>x', open: false, answered: true, email: 'leak@x.no' } }); };
+  const res = await call('/s/' + TOKEN + '?score=7', {}, surveyEnv());
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('Referrer-Policy'), 'no-referrer');
+  const body = await res.text();
+  assert.ok(!body.includes('</script><b>') && !body.includes('leak@x.no'));
+  assert.ok(body.includes('"answered":true'));
+  assert.equal(upstream[0].opts.headers['X-CC-Worker-Secret'], 'ssecret');
+  assert.deepEqual(JSON.parse(upstream[0].opts.body), { action: 'survey', token: TOKEN });
+  assert.ok(!upstream[0].url.includes(TOKEN));
+});
+
+test('survey answer: same origin only, strict score, limited per IP and token', async () => {
+  const env = surveyEnv();
+  assert.equal((await call('/v1/survey/answer', { ...sameOrigin({ token: TOKEN, score: 7 }), headers: { Origin: 'https://evil.example', 'Content-Length': '40' } }, env)).status, 403);
+  for (const score of [11, -1, 7.5, '7']) assert.equal((await call('/v1/survey/answer', sameOrigin({ token: TOKEN, score }), env)).status, 400);
+  assert.equal(upstream.length, 0);
+  assert.equal((await call('/v1/survey/answer', sameOrigin({ token: TOKEN, score: 7, comment: 'ok' }), env)).status, 200);
+  assert.deepEqual(JSON.parse(upstream[0].opts.body), { action: 'answer', token: TOKEN, score: 7, comment: 'ok' });
+  assert.deepEqual(limits.slice(-2), [['survey_ip', ''], ['survey_token', TOKEN]]);
+});
+
+test('survey one-click unsubscribe: RFC 8058 body only', async () => {
+  const req = body => ({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': String(body.length) }, body });
+  assert.equal((await call('/s/' + TOKEN + '/unsubscribe', req('nope'), surveyEnv())).status, 400);
+  assert.equal((await call('/s/' + TOKEN + '/unsubscribe', req('List-Unsubscribe=One-Click'), surveyEnv())).status, 200);
+  assert.deepEqual(JSON.parse(upstream[0].opts.body), { action: 'unsubscribe', token: TOKEN });
+});
+
+test('survey logo: only the image bytes, cached, never a redirect or an upstream URL', async () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2]);
+  let answer = () => new Response(PNG, { headers: { 'Content-Type': 'image/png' } });
+  globalThis.fetch = async (url, opts) => { upstream.push({ url, opts }); return answer(); };
+  const env = surveyEnv();
+  const res = await call('/s/' + TOKEN + '/logo', {}, env);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('Content-Type'), 'image/png');
+  assert.equal(res.headers.get('Cache-Control'), 'public, max-age=86400');
+  assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(res.headers.get('Location'), null);
+  assert.deepEqual(new Uint8Array(await res.arrayBuffer()), PNG);
+  assert.deepEqual(JSON.parse(upstream[0].opts.body), { action: 'logo', token: TOKEN });
+  assert.ok(!upstream[0].url.includes(TOKEN));
+  assert.deepEqual(limits.slice(-2), [['survey_ip', ''], ['survey_token', TOKEN]]);
+  // Not an allowed image type, an error, or a redirect from upstream → plain 404, nothing passed on.
+  for (const r of [
+    () => new Response('<svg/>', { headers: { 'Content-Type': 'image/svg+xml' } }),
+    () => new Response('<b>x</b>', { headers: { 'Content-Type': 'text/html' } }),
+    () => Response.json({ success: false, error: 'not_found' }, { status: 404 }),
+    () => new Response(null, { status: 302, headers: { Location: 'https://app.example/fileupload/x?api_token=leak' } }),
+  ]) {
+    answer = r;
+    const bad = await call('/s/' + TOKEN + '/logo', {}, env);
+    assert.equal(bad.status, 404);
+    assert.equal(bad.headers.get('Location'), null);
+    const all = [...bad.headers].join('\n') + await bad.text();
+    assert.ok(!/api_token|fileupload|svg|<b>/.test(all), all);
+  }
+  const n = upstream.length;
+  assert.equal((await call('/s/short/logo', {}, env)).status, 404);
+  assert.equal(upstream.length, n);
+});
+
+test('survey page: logo_url is only ever our own /s/<token>/logo', async () => {
+  globalThis.fetch = async () => Response.json({ success: true, survey: { org_name: 'Acme', open: true, logo_url: 'https://app.example/version-test/fileupload/f/logo.png?api_token=leak' } });
+  const body = await (await call('/s/' + TOKEN, {}, surveyEnv())).text();
+  assert.ok(body.includes('"logo_url":"/s/' + TOKEN + '/logo"'));
+  assert.ok(!/api_token|fileupload/.test(body));
+  globalThis.fetch = async () => Response.json({ success: true, survey: { org_name: 'Acme', open: true, logo_url: '' } });
+  assert.ok((await (await call('/s/' + TOKEN, {}, surveyEnv())).text()).includes('"logo_url":""'));
+});

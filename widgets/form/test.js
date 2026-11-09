@@ -29,7 +29,8 @@ class Node {
   fire(t, ev) { ev = Object.assign({ type: t, preventDefault() { ev.prevented = true; } }, ev); (this.listeners[t] || []).forEach(fn => fn(ev)); return ev; }
   focus() { focused = this; }
   click() { this.fire('click'); }
-  attachShadow() { return (this.shadowRoot = new Node('#shadow')); }
+  attachShadow() { this.shadowRoot = new Node('#shadow'); this.shadowRoot.host = this; return this.shadowRoot; }
+  remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
   showModal() { this.open = true; }
   close() { this.open = false; this.fire('close'); }
 }

@@ -64,6 +64,17 @@ function fineLine(parts, cls) {
 }
 function poweredBy() { return link(POWERED, 'Powered by CustomerCatalyst'); }
 
+// ── loading ─────────────────────────────────────────────────────────────────
+// Both widgets: a spinner for busy buttons (currentColor, so it sits on the org colour) and
+// skeleton blocks (.sk). A skeleton stays invisible for its first 150 ms (ccSkIn), so a fast
+// answer never flashes one. Reduced motion: no spin, no shimmer; the spinner only pulses.
+var LOADING_CSS = '.spin{display:inline-block;flex:none;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ccSpin .7s linear infinite}' +
+  '.sk{display:block;background:#EEF3F1 linear-gradient(90deg,#EEF3F1 35%,#F8FAF9 50%,#EEF3F1 65%);background-size:300% 100%;border-radius:6px;animation:ccSkIn .15s,ccShim 1.2s linear infinite}' +
+  '@keyframes ccSpin{to{transform:rotate(360deg)}}@keyframes ccShim{from{background-position:100% 0}to{background-position:0 0}}' +
+  '@keyframes ccSkIn{from,to{visibility:hidden}}@keyframes ccPulse{50%{opacity:.35}}' +
+  '@media (prefers-reduced-motion:reduce){.spin{animation:ccPulse 1.4s ease-in-out infinite}.sk{animation:ccSkIn .15s}}';
+function spinner() { return h('span', { 'class': 'spin', 'aria-hidden': 'true' }); }
+
 // ── colours ─────────────────────────────────────────────────────────────────
 // The org's colour on buttons, a darkened copy for text, so both stay at 4.5:1.
 function rgb(hex) { return [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); }); }

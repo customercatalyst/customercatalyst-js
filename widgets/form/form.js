@@ -74,7 +74,7 @@
       '.files li{display:flex;align-items:center;gap:4px;min-width:0}.files li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.empty{color:#5F6B67}' +
       '.rm{flex:none;width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:#5F6B67;font-size:18px;line-height:1;cursor:pointer}.rm:hover{background:#F1F4F3;color:#13231F}' +
-      '.send{height:48px;width:100%;border-radius:' + SEND + ';background:' + p.brand + ';color:' + p.on + ';border:0;font:inherit;font-weight:600;font-size:15px;cursor:pointer;margin-top:4px}' +
+      '.send{height:48px;width:100%;border-radius:' + SEND + ';background:' + p.brand + ';color:' + p.on + ';border:0;font:inherit;font-weight:600;font-size:15px;cursor:pointer;margin-top:4px;display:flex;align-items:center;justify-content:center;gap:10px}' +
       '.send:hover{filter:brightness(.94)}.send[aria-busy=true]{opacity:.75;cursor:progress}' +
       '.send[data-preview]{cursor:default;filter:none}' +
       '.sendrow{display:flex;flex-direction:column;gap:6px}.note{font-size:12px;color:#5F6B67;text-align:center}.alert{font-size:14px;color:#B42318}.alert:empty{display:none}' +
@@ -99,7 +99,10 @@
       '@media (max-width:480px){.f{padding:20px}.done{padding:28px 20px}.hd{padding:24px 0 20px}.sum{grid-template-columns:minmax(0,1fr);gap:2px}.sum dd{margin-bottom:8px}}' +
       'dialog{border:0;padding:0;width:min(560px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto;border-radius:' + CARD + ';background:transparent}' +
       'dialog::backdrop{background:rgba(15,23,21,.5)}dialog .f{border:0}' +
-      '.x{position:absolute;top:10px;right:10px;width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:#3D4C47;font-size:22px;cursor:pointer;z-index:1}';
+      '.x{position:absolute;top:10px;right:10px;width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:#3D4C47;font-size:22px;cursor:pointer;z-index:1}' +
+      // Skeleton card shown while the config loads (the real form's title, fields and button).
+      LOADING_CSS + '.sk1{height:26px;width:55%}.sk2{height:14px;width:80%}.skl{height:12px;width:30%}.skc{animation:ccSkIn .15s}' +
+      '.skin{height:44px;border-radius:10px}.skta{height:130px;border-radius:10px}.skbt{height:48px;border-radius:10px;margin-top:4px}';
   }
 
   // ── the form ──────────────────────────────────────────────────────────────
@@ -266,7 +269,7 @@
       }
       var fd = submissionData(key ? ['key', key] : ['slug', slug], { name: str(name.value), email: str(email.value), topic: picked && str(picked.id),
         subject: str(subject.value), message: str(message.value) }, extra, rows, files, ts.token);
-      busy = true; send.disabled = true; send.setAttribute('aria-busy', 'true'); send.textContent = 'Sending…';
+      busy = true; send.disabled = true; send.setAttribute('aria-busy', 'true'); send.replaceChildren(spinner(), document.createTextNode('Sending…'));
       var finish = function () {
         busy = false; send.disabled = false; send.removeAttribute('aria-busy'); send.textContent = str(cfg.button_text) || 'Send';
         ts.reset(); // single use: ask the frame for a fresh one
@@ -322,8 +325,8 @@
     return root;
   }
 
-  function closed(target, cfg) {
-    var root = shadow(target, cfg);
+  function closed(root, cfg) {
+    root.replaceChildren(h('style', {}, [css(cfg || {})]));
     root.appendChild(h('div', { 'class': 'page' }, [h('div', { 'class': 'hd' }),
       h('div', { 'class': 'card f', role: 'status' }, [h('h1', { 'class': 't' }, [cfg ? 'This form is closed right now.' : 'This form is not available.']),
         h('p', {}, [cfg && str(cfg.org_name) ? 'Please contact ' + str(cfg.org_name) + ' another way.' : 'Check the link and try again.'])]),
@@ -339,6 +342,9 @@
       script.parentNode.insertBefore(target, script);
     }
     if (!target && !opener) return;
+    // Inline or hosted form: a skeleton card holds its place until the config answers. Its shadow root
+    // then takes the form (or the hosted "closed" card); refused inline, it is removed (nothing left on the page).
+    var sk = !opener && !preview ? skeleton(target) : null;
     var got = key || slug
       ? fetch(HOST + '/v1/form/config?' + (key ? 'key=' + encodeURIComponent(key) : 'slug=' + encodeURIComponent(slug)), { credentials: 'omit' })
         .then(function (r) { return r.json(); })
@@ -346,10 +352,14 @@
       : Promise.resolve({ success: true, config: {} }); // /v1/preview: defaults until the settings page sends values
     got.then(function (res) {
       var cfg = res && res.success === true && res.config && typeof res.config === 'object' ? clean(res.config) : null;
-      if (!cfg || (cfg.enabled !== true && !preview)) { if (hosted && target) closed(target, cfg); return; }
+      if (!cfg || (cfg.enabled !== true && !preview)) {
+        if (hosted && target) closed(sk || shadow(target, cfg), cfg);
+        else if (sk) sk.host.remove();
+        return;
+      }
       var titleId = uid + '-title';
       if (opener) return popup(opener, cfg, titleId);
-      var root = null;
+      var root = sk;
       paint(cfg);
       // Live settings preview: the Bubble page that frames us sends unsaved values.
       // Preview only (Send is disabled there, nothing reaches the server), and only
@@ -378,6 +388,16 @@
         mountForm(cfg, slot, titleId);
       }
     });
+  }
+
+  // The form's shape in .sk blocks, in a new shadow root (returned).
+  function skeleton(target) {
+    var root = shadow(target), sk = function (c) { return h('span', { 'class': 'sk ' + c }); };
+    var field = function (c) { return h('div', { 'class': 'fld' }, [sk('skl'), sk(c)]); };
+    var card = h('div', { 'class': 'f skc', role: 'status', 'aria-busy': 'true', 'aria-label': 'Loading the support form' }, [
+      sk('sk1'), sk('sk2'), h('div', { 'class': 'two' }, [field('skin'), field('skin')]), field('skin'), field('skta'), sk('skbt')]);
+    root.appendChild(hosted ? h('div', { 'class': 'page' }, [h('div', { 'class': 'hd' }), h('div', { 'class': 'card' }, [card])]) : card);
+    return root;
   }
 
   // Popup from the org's own button: a native modal <dialog> (inert page behind,

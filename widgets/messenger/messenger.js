@@ -236,7 +236,9 @@
       '.foot{margin-top:auto;font-size:12px;color:#6B7672;text-align:center}' +
       '.foot>span{white-space:nowrap}.foot a{color:inherit;text-decoration:none}.foot a:hover{text-decoration:underline}' +
       // New / Sent bar
-      '.bar{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid #EDF0EF;flex:none}' +
+      '.bar{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid #EDF0EF;flex:none;position:sticky;top:0;z-index:2;background:#fff}' +
+      // New: Send + footer stay at the bottom while the fields scroll
+      '.sf{position:sticky;bottom:0;z-index:2;margin:auto -16px -16px;padding:12px 16px 14px;background:#fff;border-top:1px solid #EDF0EF;display:flex;flex-direction:column;gap:10px}' +
       '.bk{width:44px;height:44px;margin:-6px;border-radius:8px;display:grid;place-items:center;color:#13231F;background:transparent;border:0;padding:0;cursor:pointer;flex:none}' +
       '.bk svg{width:18px;height:18px}.bk:hover,.x:hover{background:rgba(19,35,31,.06)}.wh .x:hover{background:rgba(255,255,255,.14)}' +
       '.bar h2{margin:0;font-size:15px;font-weight:700;color:#13231F;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar .x{color:#13231F}' +
@@ -325,6 +327,9 @@
       '.cin::placeholder{color:#727776;opacity:1}.cin:focus{border-color:' + p.brand + ';outline:none;box-shadow:' + ring + '}' +
       '.sb{width:40px;height:40px;border-radius:' + BTN + ';background:' + p.brand + ';color:' + p.on + ';border:0;display:grid;place-items:center;flex:none;cursor:pointer;padding:0;margin:0}' +
       '.sb svg{width:18px;height:18px}.sb.att{background:#F3F7F6;color:#2E3D39}.sb:hover{filter:brightness(.94)}.sb[aria-busy=true]{opacity:.75;cursor:progress}' +
+      // Loading: list rows from storage wait for their preview line and time; the thread shows bubble shapes.
+      LOADING_CSS + '.skp{height:11px;width:75%;margin:3px 0}.skt{height:10px;width:34px;margin-top:3px;flex:none}' +
+      '.skb{height:38px;width:160px;border-radius:14px}.them .skb{border-bottom-left-radius:4px}.me .skb{border-bottom-right-radius:4px}.skb.big{height:58px;width:220px}' +
       // Phones: the open panel takes the whole screen; the launcher steps aside, the panel's own X closes.
       (preview ? '' : '@media (max-width:480px){.w{left:0;right:0;top:0;bottom:0;width:auto;max-width:none;height:auto;border-radius:0}' +
         '.x{display:grid}.launch[aria-expanded=true]{display:none}.in,.cin{font-size:16px}}');
@@ -601,11 +606,10 @@
       ts = turnstile(HOST, invisible, function (st) { if (st.token && alert.textContent === NOT_VERIFIED) alert.textContent = ''; });
       form.appendChild(ts.frame);
     }
-    form.appendChild(send);
     var privacy = invisible && safeUrl(cfg.privacy_url);
     // One 12px line fits 336px: "We'll reply by email · Powered by CustomerCatalyst" (managed: the visible
     // Turnstile widget right above carries Cloudflare's own mark), or "Powered by … · Privacy" (invisible).
-    form.appendChild(foot([invisible ? null : preview ? 'Preview: sending is off' : 'We\'ll reply by email'], privacy ? link(privacy, 'Privacy') : null));
+    form.appendChild(h('div', { 'class': 'sf' }, [send, foot([invisible ? null : preview ? 'Preview: sending is off' : 'We\'ll reply by email'], privacy ? link(privacy, 'Privacy') : null)]));
 
     function validate() {
       var bad = [];
@@ -638,7 +642,7 @@
       var vName = me ? me.name : str(name.value), vEmail = me ? me.email : str(email.value);
       var fd = submissionData(['key', key], { name: vName, email: vEmail, topic: picked && str(picked.id),
         subject: str(subject.value), message: str(message.value) }, extra, rows, files, ts.token);
-      busy = true; send.disabled = true; send.setAttribute('aria-busy', 'true'); send.replaceChildren(icon('send'), 'Sending…');
+      busy = true; send.disabled = true; send.setAttribute('aria-busy', 'true'); send.replaceChildren(spinner(), 'Sending…');
       var finish = function () { busy = false; send.disabled = false; send.removeAttribute('aria-busy'); send.replaceChildren(icon('send'), 'Send'); ts.reset(); };
       postSubmission(HOST + '/v1/messenger/submit', fd, { rows: rows, setError: setError, alert: alert, finish: finish,
         closed: ['messenger_closed', 'Messages are switched off right now.'],
@@ -701,8 +705,10 @@
     var top = bar('Your conversations');
     var list = h('div', { 'class': 'list' });
     function update() {
-      var items = convList();
+      // No answer yet: rows come from storage, with placeholders where the preview and time will go.
+      var items = convList(), waiting = !convData, sk = function (c) { return h('span', { 'class': 'sk ' + c, 'aria-hidden': 'true' }); };
       list.replaceChildren();
+      if (waiting) list.setAttribute('aria-busy', 'true'); else list.removeAttribute('aria-busy');
       if (!items.length) { list.appendChild(h('p', { 'class': 'empty' }, ['No conversations yet.'])); return; }
       var org = str(cfg.org_name).charAt(0).toUpperCase() || '?';
       items.forEach(function (c) {
@@ -710,8 +716,8 @@
         var it = h('button', { type: 'button', 'class': news ? 'it unread' : 'it' }, [
           h('span', { 'class': 'ava', 'aria-hidden': 'true' }, [c.last_initials || org]),
           h('span', { 'class': 'tx' }, [
-            h('span', { 'class': 'r1' }, [h('b', {}, [c.subject || c.label || 'Conversation']), h('time', {}, [ago(c.last_at)])]),
-            c.last_kind === 'email' ? h('span', { 'class': 'pre' }, ['Replied by email']) : c.last_preview ? h('span', { 'class': 'pre' }, [who + c.last_preview]) : null,
+            h('span', { 'class': 'r1' }, [h('b', {}, [c.subject || c.label || 'Conversation']), waiting ? sk('skt') : h('time', {}, [ago(c.last_at)])]),
+            waiting ? sk('skp') : c.last_kind === 'email' ? h('span', { 'class': 'pre' }, ['Replied by email']) : c.last_preview ? h('span', { 'class': 'pre' }, [who + c.last_preview]) : null,
             h('span', { 'class': 'meta' }, [c.status ? h('span', { 'class': c.status === 'open' ? 'stc open' : 'stc done' }, [STATUS[c.status]]) : null, c.label])]),
           news ? h('span', { 'class': 'dot', 'aria-hidden': 'true' }) : null,
           news ? h('span', { 'class': 'sr' }, [', new reply']) : null]);
@@ -737,7 +743,9 @@
     var t = threadT, stored = convs().filter(function (c) { return c.t === t; })[0] || {}, known = (convData && convData[t]) || {};
     var sub = function (k) { return [k.label, STATUS[k.status]].filter(Boolean).join(' · '); };
     var top = bar([known.subject || stored.subject || 'Conversation', sub(known.label ? known : stored)], 'list');
-    var msgs = h('div', { 'class': 'msgs', role: 'log', 'aria-label': 'Messages', tabindex: '0' });
+    // Bubble shapes until the first answer replaces them.
+    var msgs = h('div', { 'class': 'msgs', role: 'log', 'aria-label': 'Messages', tabindex: '0', 'aria-busy': 'true' },
+      [['them', 'sk skb big'], ['me', 'sk skb'], ['them', 'sk skb']].map(function (x) { return h('div', { 'class': 'm ' + x[0], 'aria-hidden': 'true' }, [h('span', { 'class': x[1] })]); }));
     var shown = {}, lastDay = null, any = false;
     var alert = h('p', { 'class': 'alert', role: 'alert' });
 
@@ -776,6 +784,7 @@
       answer(postJson('/v1/messenger/thread', { key: key, token: t, seen: seen })).then(function (res) {
         var b = res.b;
         if (threadT !== t || screen !== 'thread') return done();
+        msgs.removeAttribute('aria-busy');
         if (!b || b.success !== true || !Array.isArray(b.messages)) {
           // Unknown, foreign or deleted: this browser forgets the token.
           if (res.status === 404 && b && b.error === 'not_found') { saveConvs(convs().filter(function (c) { return c.t !== t; })); if (convData) delete convData[t]; }
@@ -830,9 +839,9 @@
       var fd = new FormData();
       fd.append('key', key); fd.append('token', t); fd.append('message', msg);
       files.forEach(function (f) { fd.append('files', f, f.name); });
-      busy = true; sendBtn.disabled = true; sendBtn.setAttribute('aria-busy', 'true');
+      busy = true; sendBtn.disabled = true; sendBtn.setAttribute('aria-busy', 'true'); sendBtn.replaceChildren(spinner());
       answer(fetch(HOST + '/v1/messenger/reply', { method: 'POST', body: fd, credentials: 'omit' })).then(function (res) {
-        busy = false; sendBtn.disabled = false; sendBtn.removeAttribute('aria-busy');
+        busy = false; sendBtn.disabled = false; sendBtn.removeAttribute('aria-busy'); sendBtn.replaceChildren(icon('send'));
         var b = res.b;
         if (!res.status) { alert.textContent = 'Could not reach us. Check your connection and try again.'; return; }
         if (!b || b.success !== true) {
